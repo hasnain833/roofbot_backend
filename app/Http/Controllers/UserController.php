@@ -84,26 +84,25 @@ class UserController extends Controller
     /**
      * Update user
      */
-    public function update(Request $request, $id)
-    {
-        $user = User::findOrFail($id);
+public function update(Request $request, $id)
+{
+    $user = User::findOrFail($id);
 
-        $validated = $request->validate([
-            'first_name' => 'sometimes|string|max:100',
-            'last_name'  => 'sometimes|string|max:100',
-            'email' => ['sometimes', 'email', Rule::unique('users')->ignore($user->id)],
-            'password' => 'sometimes|string|min:6',
-            'role' => ['sometimes', Rule::in(['admin', 'user'])],
-        ]);
+    $validated = $request->validate([
+        'first_name' => 'sometimes|string|max:100',
+        'last_name'  => 'sometimes|string|max:100',
+        'email' => ['sometimes', 'email', Rule::unique('users')->ignore($user->id)],
+        'role' => ['sometimes', Rule::in(['admin', 'user'])],
+    ]);
 
-        if (isset($validated['password'])) {
-            $validated['password'] = Hash::make($validated['password']);
-        }
+    $user->update($validated);
 
-        $user->update($validated);
+    return response()->json([
+        'message' => 'User updated successfully',
+        'user' => $user
+    ], 200);
+}
 
-        return response()->json(['message' => 'User updated successfully', 'user' => $user], 200);
-    }
 
     /**
      * Delete user
@@ -115,4 +114,18 @@ class UserController extends Controller
 
         return response()->json(['message' => 'User deleted successfully'], 200);
     }
+ public function updatePassword(Request $request, $id)
+{
+    $validated = $request->validate([
+        'password' => 'required|string|min:6|confirmed',
+    ]);
+
+    $user = User::findOrFail($id);
+    $user->password = Hash::make($validated['password']);
+    $user->save();
+
+    return response()->json(['message' => 'Password updated successfully'], 200);
+}
+
+
 }

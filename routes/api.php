@@ -22,3 +22,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/profile', [ProfileInformationController::class, 'update']);
 });
 
+Route::middleware('auth:sanctum')->group(function () {
+    Route::put('/users/{id}', [UserController::class, 'update']);
+    Route::put('/users/{id}/password', [UserController::class, 'updatePassword']);
+});
+Route::put('/users/{id}/update-password', [UserController::class, 'updatePassword']);

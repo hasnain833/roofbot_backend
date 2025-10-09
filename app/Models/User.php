@@ -49,4 +49,14 @@ class User extends Authenticatable
             'password' => 'hashed',
         ];
     }
+    public function tenants()
+{
+    return $this->belongsToMany(Tenant::class, 'tenant_users');
+}
+
+public function leads()
+{
+    return $this->hasMany(Lead::class);
+}
+
 }
