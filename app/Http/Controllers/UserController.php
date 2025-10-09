@@ -6,15 +6,46 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
+use App\Http\Resources\UserResource;
 
 class UserController extends Controller
 {
     /**
      * List all users (only admin)
      */
-    public function index()
+    public function index(Request $request)
     {
-        return response()->json(User::all(), 200);
+        $query = User::query();
+        $query->where('role', '!=', 'superadmin');
+
+        // Sorting
+        if ($request->has('sortBy') && $request->has('order')) {
+            $query->orderBy($request->sortBy, $request->order);
+        }
+
+        // Searching
+        if ($request->has('search') && $request->search != '') {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('first_name', 'like', "%$search%")
+                ->orWhere('last_name', 'like', "%$search%")
+                    ->orWhere('email', 'like', "%$search%");
+            });
+        }
+
+        // Pagination
+        $page     = $request->get('page', 1);
+        $pageSize = $request->get('pageSize', 10);
+
+        $total = $query->count();
+        $data  = $query->skip(($page - 1) * $pageSize)
+            ->take($pageSize)
+            ->get();
+
+        return response()->json([
+            'data' => $data,
+            'total' => $total,
+        ]);
     }
 
     /**
@@ -60,12 +91,12 @@ class UserController extends Controller
         $validated = $request->validate([
             'first_name' => 'sometimes|string|max:100',
             'last_name'  => 'sometimes|string|max:100',
-            'email' => ['sometimes','email', Rule::unique('users')->ignore($user->id)],
+            'email' => ['sometimes', 'email', Rule::unique('users')->ignore($user->id)],
             'password' => 'sometimes|string|min:6',
             'role' => ['sometimes', Rule::in(['admin', 'user'])],
         ]);
 
-        if(isset($validated['password'])) {
+        if (isset($validated['password'])) {
             $validated['password'] = Hash::make($validated['password']);
         }
 
