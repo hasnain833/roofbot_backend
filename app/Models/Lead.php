@@ -22,6 +22,7 @@ class Lead extends Model
         'zip',
         'country',
         'status',
+        'service_type_id'
     ];
 
     public function tenant()

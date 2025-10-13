@@ -29,4 +29,9 @@ class Tenant extends Model
     {
         return $this->hasMany(Lead::class);
     }
+
+    public function agents()
+    {
+        return $this->hasMany(TenantAgent::class);
+    }
 }

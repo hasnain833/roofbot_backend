@@ -11,11 +11,11 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('tenant_agent_credentials', function (Blueprint $table) {
+        Schema::create('tenant_agent_integrations', function (Blueprint $table) {
             $table->id();
             $table->timestamps();
-            $table->unsignedBigInteger('tenant_agent_id')->index('idx_tenant_agent_credentials_tenant_agent_id');
-            $table->foreign('tenant_agent_id', 'fk_tenant_agent_credentials_tenant_agent_id')->references('id')->on('tenant_agents')->onDelete('cascade');
+            $table->unsignedBigInteger('tenant_agent_id')->index('idx_tenant_agent_integrations_tenant_agent_id');
+            $table->foreign('tenant_agent_id', 'fk_tenant_agent_integrations_tenant_agent_id')->references('id')->on('tenant_agents')->onDelete('cascade');
             $table->string('provider');
             $table->text('key');
             $table->text('secret');
@@ -28,6 +28,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('tenant_agent_credentials');
+        Schema::dropIfExists('tenant_agent_integrations');
     }
 };

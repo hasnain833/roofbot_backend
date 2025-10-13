@@ -16,6 +16,7 @@ use Laravel\Fortify\Fortify;
 use Laravel\Fortify\Contracts\RegisterResponse as RegisterResponseContract;
 use App\Http\Responses\RegisterResponse;
 use Laravel\Fortify\Contracts\LoginResponse;
+use Laravel\Fortify\Contracts\CreatesNewUsers;
 
 class FortifyServiceProvider extends ServiceProvider
 {
@@ -25,7 +26,9 @@ class FortifyServiceProvider extends ServiceProvider
     public function register(): void
     {
         Fortify::ignoreRoutes();
-       // $this->app->singleton(RegisterResponseContract::class, RegisterResponse::class);
+         $this->app->singleton(CreatesNewUsers::class, CreateNewUser::class);
+
+        //$this->app->singleton(RegisterResponseContract::class, RegisterResponse::class);
     }
 
     /**

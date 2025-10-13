@@ -7,6 +7,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 use App\Http\Resources\UserResource;
+use App\Models\TenantUser;
+use Illuminate\Support\Facades\Auth;
 
 class UserController extends Controller
 {
@@ -16,6 +18,9 @@ class UserController extends Controller
     public function index(Request $request)
     {
         $query = User::query();
+        $query->whereHas('tenantUser', function ($query) {
+            $query->where('tenant_id', Auth::user()->tenant->id);
+        });
         $query->where('role', '!=', 'superadmin');
 
         // Sorting
@@ -34,7 +39,7 @@ class UserController extends Controller
         }
 
         // Pagination
-        $page     = $request->get('page', 1);
+        $page = $request->get('page', 1);
         $pageSize = $request->get('pageSize', 10);
 
         $total = $query->count();
@@ -69,6 +74,18 @@ class UserController extends Controller
             'role'       => $validated['role'],
         ]);
 
+        $tenant_id = null;
+        if (Auth::user()->role != 'superadmin') {
+            $tenant_id = Auth::user()->tenantUser->tenant_id;
+        } else {
+            $tenant_id = Auth::user()->tenant->id;
+        }
+
+        TenantUser::create([
+            'user_id' => $user->id,
+            'tenant_id' => $tenant_id
+        ]);
+
         return response()->json(['message' => 'User created successfully', 'user' => $user], 201);
     }
 
@@ -89,10 +106,10 @@ public function update(Request $request, $id)
     $user = User::findOrFail($id);
 
     $validated = $request->validate([
-        'first_name' => 'sometimes|string|max:100',
-        'last_name'  => 'sometimes|string|max:100',
-        'email' => ['sometimes', 'email', Rule::unique('users')->ignore($user->id)],
-        'role' => ['sometimes', Rule::in(['admin', 'user'])],
+        'first_name' => 'required|string|max:100',
+        'last_name'  => 'required|string|max:100',
+        'email' => ['required', 'email', Rule::unique('users')->ignore($user->id)],
+        'role' => ['required', Rule::in(['admin', 'user'])],
     ]);
 
     $user->update($validated);
@@ -125,6 +142,38 @@ public function update(Request $request, $id)
     $user->save();
 
     return response()->json(['message' => 'Password updated successfully'], 200);
+}
+
+
+public function updateProfile(Request $request)
+{
+    $validated = $request->validate([
+        'first_name' => 'required|string|max:100',
+        'last_name'  => 'required|string|max:100',
+        'email' => ['required', 'email', Rule::unique('users')->ignore(Auth::user()->id)],
+    ]);
+
+    $user = User::findOrFail(Auth::user()->id);
+
+    $user->update($validated);
+
+    return response()->json([
+        'message' => 'User updated successfully',
+        'user' => $user
+    ], 200);
+}
+
+public function updatePasswordProfile(Request $request)
+{
+    $validated = $request->validate([
+        'password' => 'required|string|min:6|confirmed',
+    ]);
+
+    $user = User::findOrFail(Auth::user()->id);
+    $user->password = Hash::make($validated['password']);
+    $user->save();
+
+    return response()->json(['message' => 'Password updated successfully', 'user' => $user], 200);
 }
 
 
