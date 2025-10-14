@@ -14,12 +14,24 @@ return new class extends Migration
         Schema::create('leads', function (Blueprint $table) {
             $table->id();
             $table->timestamps();
+
             $table->unsignedBigInteger('user_id')
-            ->nullable()
-            ->index('idx_leads_user_id');
-            $table->foreign('user_id', 'fk_leads_user_id')->references('id')->on('users')->onDelete('cascade');
+                ->nullable()
+                ->index('idx_leads_user_id');
+            $table->foreign('user_id', 'fk_leads_user_id')
+                ->references('id')
+                ->on('users')
+                ->onDelete('cascade');
+
             $table->unsignedBigInteger('tenant_id')->index('idx_leads_tenant_id');
-            $table->foreign('tenant_id', 'fk_leads_tenant_id')->references('id')->on('tenants')->onDelete('cascade');
+            $table->foreign('tenant_id', 'fk_leads_tenant_id')
+                ->references('id')
+                ->on('tenants')
+                ->onDelete('cascade');
+
+           $table->unsignedBigInteger('service_type_id')->nullable();
+
+
             $table->string('first_name');
             $table->string('last_name')->nullable();
             $table->string('email')->nullable();

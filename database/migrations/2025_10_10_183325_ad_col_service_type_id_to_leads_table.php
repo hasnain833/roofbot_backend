@@ -9,13 +9,7 @@ return new class extends Migration
     /**
      * Run the migrations.
      */
-    public function up(): void
-    {
-        Schema::table('leads', function (Blueprint $table) {
-            $table->unsignedBigInteger('service_type_id')->index('idx_leads_service_type_id');
-            $table->foreign('service_type_id', 'fk_leads_service_type_id')->references('id')->on('service_types')->onDelete('cascade');
-        });
-    }
+    
 
     /**
      * Reverse the migrations.

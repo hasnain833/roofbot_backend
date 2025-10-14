@@ -7,15 +7,30 @@ use Illuminate\Support\Facades\Auth;
 
 class Helper
 {
+    // ✅ Return current tenant
     public static function tenant()
     {
-        return app('tenant');
+        return self::resolveTenant();
     }
+
+    // ✅ Resolve tenant based on logged-in user
     public static function resolveTenant()
     {
-        if (Auth::user()->role == 'superadmin') {
-            return Tenant::where('user_id', Auth::user()->id)->first();
+        $user = Auth::user();
+        if (!$user) return null;
+
+        if ($user->role === 'superadmin') {
+            return Tenant::where('user_id', $user->id)->first();
         }
-        return Tenant::where('id', Auth::user()->tenantUser->tenant_id)->first();
+
+        // Make sure tenantUser relation exists in User model
+        if (method_exists($user, 'tenantUser')) {
+            $tenantUser = $user->tenantUser()->first();
+            if ($tenantUser) {
+                return Tenant::find($tenantUser->tenant_id);
+            }
+        }
+
+        return null;
     }
 }

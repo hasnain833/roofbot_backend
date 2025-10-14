@@ -8,6 +8,7 @@ use App\Http\Controllers\UserController;
 use App\Http\Controllers\Auth\ProfileInformationController;
 use App\Http\Controllers\CompanyController;
 use Laravel\Fortify\Http\Controllers\RegisteredUserController;
+use App\Http\Controllers\LeadController;
 
 Route::post('/auth/login', [LoginController::class, 'store']);
 Route::post('/auth/signup', [RegisteredUserController::class, 'store']);
@@ -36,4 +37,9 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/profile/update', [UserController::class, 'updateProfile']);
     Route::put('/profile/password/update', [UserController::class, 'updatePasswordProfile']);
+});
+
+
+Route::middleware(['auth:sanctum'])->group(function () {
+    Route::apiResource('leads', LeadController::class);
 });
