@@ -9,6 +9,7 @@ use App\Http\Controllers\Auth\ProfileInformationController;
 use App\Http\Controllers\CompanyController;
 use Laravel\Fortify\Http\Controllers\RegisteredUserController;
 use App\Http\Controllers\LeadController;
+use App\Http\Controllers\TwilioController;
 
 Route::post('/auth/login', [LoginController::class, 'store']);
 Route::post('/auth/signup', [RegisteredUserController::class, 'store']);
@@ -26,6 +27,8 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
      */
     Route::get('/tenant/integration', [AgentIntegrationController::class, 'index']);
     Route::put('/tenant/integration/{agent}', [AgentIntegrationController::class, 'update']);
+    Route::post('/tenant/integration/update-google', [AgentIntegrationController::class, 'updateGoogle']);
+    Route::post('/tenant/integration/update-twilio', [AgentIntegrationController::class, 'updateTwilio']);
 
     /**
      * Company Settings
@@ -43,3 +46,6 @@ Route::middleware('auth:sanctum')->group(function () {
 Route::middleware(['auth:sanctum'])->group(function () {
     Route::apiResource('leads', LeadController::class);
 });
+
+
+
