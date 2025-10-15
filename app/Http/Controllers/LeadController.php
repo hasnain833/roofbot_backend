@@ -10,12 +10,21 @@ use Illuminate\Support\Facades\Auth;
 class LeadController extends Controller
 {
     // ✅ Fetch all leads for current tenant
-    public function index()
+    public function index(Request $request)
     {
         $tenant = Helper::tenant();
         if (!$tenant) {
             return response()->json(['error' => 'Tenant not found'], 400);
         }
+            $query = Lead::where('tenant_id', $tenant->id);
+          if ($search = $request->query('search')) {
+        $query->where(function ($q) use ($search) {
+            $q->where('first_name', 'like', "%{$search}%")
+              ->orWhere('last_name', 'like', "%{$search}%")
+              ->orWhere('email', 'like', "%{$search}%")
+              ->orWhere('phone', 'like', "%{$search}%");
+        });
+    }
 
         $leads = Lead::where('tenant_id', $tenant->id)->get();
 

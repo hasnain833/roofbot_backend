@@ -1,11 +1,13 @@
 <?php
-
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 
 class Appointment extends Model
 {
+    use HasFactory;
+
     protected $fillable = [
         'tenant_id',
         'user_id',
@@ -14,8 +16,32 @@ class Appointment extends Model
         'description',
         'notes',
         'status',
-        'type',
-        'priority',
-        'reminder'
+        'service_type',
+        'start_time',
+        'end_time',
+        'google_event_id',
+        'reminder_sent',
     ];
+
+    protected $casts = [
+        'start_time' => 'datetime',
+        'end_time' => 'datetime',
+        'reminder_sent' => 'boolean',
+    ];
+
+    public function lead()
+    {
+        return $this->belongsTo(Lead::class);
+    }
+
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    public function tenant()
+    {
+        return $this->belongsTo(Tenant::class);
+    }
 }
+
