@@ -43,5 +43,10 @@ class Appointment extends Model
     {
         return $this->belongsTo(Tenant::class);
     }
+    public function serviceType()
+{
+    return $this->belongsTo(ServiceType::class);
+}
+
 }
 

@@ -13,7 +13,7 @@ class AppointmentController extends Controller
     public function index(Request $request)
     {
         $appointments = Appointment::where('tenant_id', $request->user()->tenant_id)
-            ->with(['lead', 'user'])
+            ->with(['lead', 'user','serviceType'])
             ->orderBy('start_time', 'asc')
             ->get();
 
@@ -25,7 +25,6 @@ class AppointmentController extends Controller
 
     public function store(Request $request)
     {
-        // ✅ Validate request first
         $validated = $request->validate([
             'lead_id' => 'nullable|exists:leads,id',
             'title' => 'required|string|max:255',
@@ -36,11 +35,9 @@ class AppointmentController extends Controller
             'end_time' => 'required|date|after:start_time',
         ]);
 
-        // ✅ Add tenant and user IDs automatically
         $validated['tenant_id'] = $request->user()->tenant_id;
         $validated['user_id'] = $request->user()->id;
 
-        // ✅ Create appointment
         $appointment = Appointment::create($validated);
 
         // ✅ Optional: send webhook to n8n

@@ -11,6 +11,8 @@ use Laravel\Fortify\Http\Controllers\RegisteredUserController;
 use App\Http\Controllers\LeadController;
 use App\Http\Controllers\TwilioController;
 use App\Http\Controllers\AppointmentController;
+use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\CrmJobController;
 
 Route::post('/auth/login', [LoginController::class, 'store']);
 Route::post('/auth/signup', [RegisteredUserController::class, 'store']);
@@ -83,3 +85,10 @@ Route::middleware('auth:sanctum')->group(function () {
         ]);
     });
 });
+
+Route::middleware(['auth:sanctum'])->group(function () {
+    Route::get('/dashboard/stats', [DashboardController::class, 'stats']);
+    Route::get('/dashboard/summary', [DashboardController::class, 'summary']);
+});
+
+Route::apiResource('crm-jobs', CrmJobController::class);
