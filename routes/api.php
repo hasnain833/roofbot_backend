@@ -92,3 +92,4 @@ Route::middleware(['auth:sanctum'])->group(function () {
 });
 
 Route::apiResource('crm-jobs', CrmJobController::class);
+
