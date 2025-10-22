@@ -11,16 +11,16 @@ return new class extends Migration
      */
     public function up()
 {
-    Schema::table('appointments', function (Blueprint $table) {
-        $table->string('status')->default('scheduled')->after('notes');
-    });
+    // Schema::table('appointments', function (Blueprint $table) {
+    //     $table->string('status')->default('scheduled')->after('notes');
+    // });
 }
 
 public function down()
 {
-    Schema::table('appointments', function (Blueprint $table) {
-        $table->dropColumn('status');
-    });
+    // Schema::table('appointments', function (Blueprint $table) {
+    //     $table->dropColumn('status');
+    // });
 }
 
 };

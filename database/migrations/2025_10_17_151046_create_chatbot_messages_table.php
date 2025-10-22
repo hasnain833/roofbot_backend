@@ -10,7 +10,7 @@ return new class extends Migration
     {
         Schema::create('chatbot_messages', function (Blueprint $table) {
             $table->id();
-            $table->unsignedBigInteger('tenant_id')->nullable(); // kis company ka message hai
+            $table->unsignedBigInteger('tenant_id')->nullable(); 
             $table->text('message');                        
             $table->enum('sender_type', ['user', 'bot']);       
             $table->timestamps();                            

@@ -4,9 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Helper;
 use App\Models\Tenant;
-use Illuminate\Http\Request;
 use App\Models\Chatbot;
-use Illuminate\Support\Facades\Http;
+use Illuminate\Http\Request;
 
 class CompanyController extends Controller
 {
@@ -17,55 +16,52 @@ class CompanyController extends Controller
         ]);
     }
 
+    public function update(Request $request, Tenant $tenant)
+    {
+        $request->validate([
+            'company' => 'required|string|max:255',
+            'domain' => 'required|string|max:255'
+        ]);
 
+        $existing = Tenant::where('domain', $request->domain)
+            ->where('id', '!=', $tenant->id)
+            ->first();
 
-public function update(Request $request, Tenant $tenant)
-{
-    $request->validate([
-        'company' => 'required|string|max:255',
-        'domain' => 'required|string'
-    ]);
-       $existing = Tenant::where('domain', $request->domain)
-        ->where('id', '!=', $tenant->id)
-        ->first();
+        if ($existing) {
+            return response()->json([
+                'message' => 'Company already exists with this domain!'
+            ], 409);
+        }
 
-    if ($existing) {
+        $tenant->update([
+            'company' => $request->company,
+            'domain' => $request->domain
+        ]);
+
+        $chatbot = Chatbot::firstOrCreate(
+            ['tenant_id' => $tenant->id],
+            [
+                'name' => $tenant->company . ' Bot',
+                'bot_token' => 'bot_' . bin2hex(random_bytes(8)),
+                'status' => 'active'
+            ]
+        );
+
+        $iframeUrl = url('/chatbot/' . $chatbot->bot_token);
+        $chatbot->update([
+            'iframe_url' => $iframeUrl,
+            'settings' => ['iframe_url' => $iframeUrl],
+        ]);
+
         return response()->json([
-            'message' => 'Company already exists with this domain!'
-        ], 409);
+            'message' => 'Company updated successfully',
+            'tenant' => $tenant,
+            'chatbot' => [
+                'id' => $chatbot->id,
+                'name' => $chatbot->name,
+                'bot_token' => $chatbot->bot_token,
+                'iframe_url' => $iframeUrl,
+            ],
+        ]);
     }
-
-    $tenant->update([
-        'company' => $request->company,
-        'domain' => $request->domain
-    ]);
-
-    $chatbot = Chatbot::firstOrCreate(
-        ['tenant_id' => $tenant->id],
-        [
-            'name' => $tenant->company . ' Bot',
-            'bot_token' => 'bot_' . bin2hex(random_bytes(8)),
-        ]
-    );
-
-    // abhi sirf dummy iframe generate kar rahe hain (n8n baad me)
-    $iframeUrl = url('/chatbot/' . $chatbot->bot_token);
-
-    $chatbot->settings = json_encode(['iframe_url' => $iframeUrl]);
-    $chatbot->save();
-
-    return response()->json([
-        'message' => 'Company updated successfully',
-        'tenant' => $tenant,
-        'chatbot' => [
-            'id' => $chatbot->id,
-            'name' => $chatbot->name,
-            'bot_token' => $chatbot->bot_token,
-            'iframe_url' => $iframeUrl
-        ],
-    ]);
-}
-
-
-
 }

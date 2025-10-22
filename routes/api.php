@@ -25,17 +25,12 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::put('/users/{id}', [UserController::class, 'update']);
     Route::delete('/users/{id}', [UserController::class, 'destroy']);
     Route::put('/users/{id}/update-password', [UserController::class, 'updatePassword']);
-    /**
-     * Update Integrations
-     */
+    
     Route::get('/tenant/integration', [AgentIntegrationController::class, 'index']);
     Route::put('/tenant/integration/{agent}', [AgentIntegrationController::class, 'update']);
     Route::post('/tenant/integration/update-google', [AgentIntegrationController::class, 'updateGoogle']);
     Route::post('/tenant/integration/update-twilio', [AgentIntegrationController::class, 'updateTwilio']);
 
-    /**
-     * Company Settings
-     */
     Route::get('/tenant', [CompanyController::class, 'index']);
     Route::put('/tenant/{tenant}', [CompanyController::class, 'update']);
 });
@@ -72,10 +67,9 @@ Route::middleware(['auth:sanctum','admin'])->group(function () {
     Route::put('/appointments/{id}', [AppointmentController::class, 'update']);
     Route::delete('/appointments/{id}', [AppointmentController::class, 'destroy']);
 });
-// routes/api.php
 
 Route::middleware('auth:sanctum')->group(function () {
-    // Existing routes...
+    
     
     Route::get('/service-types', function () {
         $types = \App\Models\ServiceType::all();
@@ -93,3 +87,4 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
 Route::apiResource('crm-jobs', CrmJobController::class);
 
+Route::post('/ai/summarize', [App\Http\Controllers\AISummaryController::class, 'summarize']);

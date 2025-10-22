@@ -7,6 +7,8 @@ use App\Models\ServiceType;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Auth;
+use App\Jobs\SyncAppointmentToGoogle;
+
 
 class AppointmentController extends Controller
 {

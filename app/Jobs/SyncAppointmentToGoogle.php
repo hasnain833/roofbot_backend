@@ -29,25 +29,39 @@ class SyncAppointmentToGoogle implements ShouldQueue
         $appointment = $this->appointment;
         $tenant = $appointment->tenant;
 
-        if (!$tenant || !$tenant->google_access_token) return;
+        if (!$tenant || !$tenant->google_access_token) {
+            \Log::warning('Google token missing for tenant ID: ' . $tenant->id ?? 'unknown');
+            return;
+        }
 
-        $client = new Client();
-        $client->setAccessToken($tenant->google_access_token);
-        $service = new Calendar($client);
+        try {
+            $client = new Client();
+            $client->setAccessToken($tenant->google_access_token);
 
-        $eventData = [
-            'summary' => $appointment->title,
-            'description' => $appointment->description ?? '',
-            'start' => ['dateTime' => $appointment->start_time->toRfc3339String(), 'timeZone' => 'UTC'],
-            'end' => ['dateTime' => $appointment->end_time->toRfc3339String(), 'timeZone' => 'UTC'],
-        ];
+            // ✅ Refresh token if expired
+            if ($client->isAccessTokenExpired() && $tenant->google_refresh_token) {
+                $client->fetchAccessTokenWithRefreshToken($tenant->google_refresh_token);
+                $tenant->update(['google_access_token' => $client->getAccessToken()]);
+            }
 
-        if ($this->isUpdate && $appointment->google_event_id) {
-            $service->events->update('primary', $appointment->google_event_id, new Calendar\Event($eventData));
-        } else {
-            $event = $service->events->insert('primary', new Calendar\Event($eventData));
-            $appointment->update(['google_event_id' => $event->id]);
+            $service = new Calendar($client);
+
+            $eventData = [
+                'summary' => $appointment->title,
+                'description' => $appointment->description ?? '',
+                'start' => ['dateTime' => $appointment->start_time->toRfc3339String(), 'timeZone' => 'UTC'],
+                'end' => ['dateTime' => $appointment->end_time->toRfc3339String(), 'timeZone' => 'UTC'],
+            ];
+
+            if ($this->isUpdate && $appointment->google_event_id) {
+                $service->events->update('primary', $appointment->google_event_id, new Calendar\Event($eventData));
+            } else {
+                $event = $service->events->insert('primary', new Calendar\Event($eventData));
+                $appointment->update(['google_event_id' => $event->id]);
+            }
+
+        } catch (\Exception $e) {
+            \Log::error('Google Calendar Sync Failed: ' . $e->getMessage());
         }
     }
 }
-
