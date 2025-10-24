@@ -15,7 +15,7 @@ class AISummaryController extends Controller
             'message' => 'required|string',
         ]);
 
-        $apiKey = env('OPENAI_API_KEY'); // Sir will give this later
+        $apiKey = env('OPENAI_API_KEY'); 
         $lead = Lead::find($request->lead_id);
 
         try {

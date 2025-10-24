@@ -86,5 +86,6 @@ Route::middleware(['auth:sanctum'])->group(function () {
 });
 
 Route::apiResource('crm-jobs', CrmJobController::class);
-
-Route::post('/ai/summarize', [App\Http\Controllers\AISummaryController::class, 'summarize']);
+Route::middleware(['auth:sanctum'])->group(function () {
+    Route::post('/ai/summarize', [LeadController::class, 'summarize']);
+});
