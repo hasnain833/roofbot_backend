@@ -56,12 +56,12 @@ public function updateTwilio(Request $request)
     $tenant_agent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
 
     $request->validate([
-        'key' => 'required|string',    // SID
-        'secret' => 'required|string', // Auth Token
+        'key' => 'required|string',    
+        'secret' => 'required|string', 
     ]);
  try {
         $client = new Client($request->key, $request->secret);
-        $client->api->v2010->accounts->read(); // test API call
+        $client->api->v2010->accounts->read(); 
     } catch (\Exception $e) {
         return response()->json([
             'message' => 'Invalid Twilio credentials. Please check SID or Auth Token.',
@@ -112,4 +112,51 @@ public function updateTwilio(Request $request)
             'integration' => $integration
         ]);
     }
+public function getGoogleCredentials(Request $request)
+{
+    $tenant_agent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
+
+    if (!$tenant_agent) {
+        return response()->json(['error' => 'Tenant agent not found'], 404);
+    }
+
+    $integration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->id)
+        ->where('provider', 'google')
+        ->first();
+
+    if (!$integration) {
+        return response()->json(['error' => 'Google integration not found'], 404);
+    }
+
+    return response()->json([
+        'key' => $integration->key,        // OAuth code / access token
+        'secret' => $integration->secret,  // Optional
+        'tenant_agent_id' => $tenant_agent->id
+    ]);
+}
+
+
+public function getTwilioCredentials(Request $request)
+{
+    $tenant_agent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
+
+    if (!$tenant_agent) {
+        return response()->json(['error' => 'Tenant agent not found'], 404);
+    }
+
+    $integration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->id)
+        ->where('provider', 'twilio')
+        ->first();
+
+    if (!$integration) {
+        return response()->json(['error' => 'Twilio integration not found'], 404);
+    }
+
+    return response()->json([
+        'key' => $integration->key,        // SID
+        'secret' => $integration->secret,  // Auth Token
+        'tenant_agent_id' => $tenant_agent->id
+    ]);
+}
+
 }

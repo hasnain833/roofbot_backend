@@ -13,6 +13,7 @@ use App\Http\Controllers\TwilioController;
 use App\Http\Controllers\AppointmentController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\CrmJobController;
+use App\Http\Controllers\BillingController;
 
 Route::post('/auth/login', [LoginController::class, 'store']);
 Route::post('/auth/signup', [RegisteredUserController::class, 'store']);
@@ -89,3 +90,14 @@ Route::apiResource('crm-jobs', CrmJobController::class);
 Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/ai/summarize', [LeadController::class, 'summarize']);
 });
+
+Route::middleware(['auth:sanctum','admin'])->group(function () {
+    Route::get('/tenant/integration/google-credentials', [AgentIntegrationController::class, 'getGoogleCredentials']);
+    Route::get('/tenant/integration/twilio-credentials', [AgentIntegrationController::class, 'getTwilioCredentials']);
+});
+
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/plans', [BillingController::class, 'plans']);
+});
+ Route::post('/guest-subscribe', [BillingController::class, 'guestSubscribe']);
+Route::post('/stripe/webhook', [BillingController::class, 'webhook']);

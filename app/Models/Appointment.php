@@ -16,6 +16,7 @@ class Appointment extends Model
         'description',
         'notes',
         'status',
+        'service_type_id',
         'service_type',
         'start_time',
         'end_time',
