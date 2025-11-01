@@ -100,4 +100,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/plans', [BillingController::class, 'plans']);
 });
  Route::post('/guest-subscribe', [BillingController::class, 'guestSubscribe']);
-Route::post('/stripe/webhook', [BillingController::class, 'webhook']);
+ 
+Route::post('/stripe/webhook', [BillingController::class, 'stripewebhook']);
+
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/subscription', [BillingController::class, 'getSubscription']);
+    Route::post('/subscription/cancel', [BillingController::class, 'cancelSubscription']);
+    Route::post('/subscription/subscribe', [BillingController::class, 'subscribe']);
+    Route::post('/subscription/upgrade', [BillingController::class, 'upgradeSubscription']);
+});
