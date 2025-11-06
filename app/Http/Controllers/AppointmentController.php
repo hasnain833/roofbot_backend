@@ -50,6 +50,10 @@ class AppointmentController extends Controller
                 ->where('provider', 'google')
                 ->value('key');
 
+             $twilioIntegration = TenantAgentIntegration::where('tenant_agent_id', $appointment->user_id)
+            ->where('provider', 'twilio')
+            ->first();
+
             $payload = [
                 'event' => 'appointment_created',
                 'fullName' => $lead ? trim($lead->first_name . ' ' . ($lead->last_name ?? '')) : null,
@@ -60,7 +64,9 @@ class AppointmentController extends Controller
                 'windowEndISO' => Carbon::parse($appointment->end_time)->toIso8601String(),
                 'tenant_id' => $appointment->tenant_id,
                 'appointment_id' => $appointment->id,
-                'google_access_token' => $googleToken 
+                'google_access_token' => $googleToken,
+                'twilio_sid' => $twilioIntegration?->key,
+                'twilio_token' => $twilioIntegration?->secret, 
             ];
 
             Http::withHeaders([

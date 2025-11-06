@@ -65,14 +65,20 @@ class UserController extends Controller
             'password' => 'required|string|min:6',
             'role' => ['required', Rule::in(['admin', 'user'])],
         ]);
+        $authUser = Auth::user();
+                 $plan = $request->plan ?? 1;
 
-        $user = User::create([
-            'first_name' => $validated['first_name'],
-            'last_name'  => $validated['last_name'] ?? null,
-            'email'      => $validated['email'],
-            'password'   => Hash::make($validated['password']),
-            'role'       => $validated['role'],
-        ]);
+               $user = User::create([
+                'first_name' => $request->first_name,
+                'last_name' => $request->last_name,
+                'email' => $request->email,
+                'password' => Hash::make($request->password),
+                'role' => $request->role,
+                'plan_id' => $authUser->plan_id,
+                'subscription_status' => $authUser->subscription_status,
+                'current_period_end' => $authUser->current_period_end,
+                'stripe_customer_id' => null 
+]);
 
         $tenant_id = null;
         if (Auth::user()->role != 'superadmin') {
@@ -86,7 +92,10 @@ class UserController extends Controller
             'tenant_id' => $tenant_id
         ]);
 
-        return response()->json(['message' => 'User created successfully', 'user' => $user], 201);
+        return response()->json([
+            'message' => 'User created successfully',
+             'user' => $user
+            ], 201);
     }
 
     /**

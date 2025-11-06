@@ -5,34 +5,38 @@ namespace Database\Seeders;
 use App\Models\Tenant;
 use App\Models\TenantAgent;
 use App\Models\User;
-// use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 
 class DatabaseSeeder extends Seeder
 {
-    /**
-     * Seed the application's database.
-     */
     public function run(): void
     {
-        $user = User::factory()->create([
-            'first_name' => 'Superadmin',
-            'role' => 'superadmin',
-            'email' => 'superadmin@roofbot.com',
-            'password' => Hash::make('password')
+        // ──────────────────────────────────────────────────────────────
+        // 1. Create the **company owner** – full access, no Stripe
+        // ──────────────────────────────────────────────────────────────
+        $owner = User::factory()->create([
+            'first_name'          => 'Griffin',
+            'last_name'           => 'B',
+            'role'                => 'superadmin',
+            'email'               => 'griffinb@invictusconnect.com',
+            'password'            => Hash::make('password'),  
+            'plan_id'             => 2,         
+            'subscription_status' => 'active',
+            'current_period_end'  => null,       
+            'stripe_customer_id'  => null,
         ]);
 
         $tenant = Tenant::create([
-            'user_id' => $user->id
+            'user_id' => $owner->id,   
         ]);
 
         TenantAgent::create([
-            'tenant_id' => $tenant->id,
-            'name' => 'Chatbot',
-            'description' => 'Description for Agent 1',
-            'type' => 'n8n',
-            'status' => 'active'
+            'tenant_id'   => $tenant->id,
+            'name'        => 'Chatbot',
+            'description' => 'Default n8n chatbot',
+            'type'        => 'n8n',
+            'status'      => 'active',
         ]);
     }
 }
