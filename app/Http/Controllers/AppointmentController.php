@@ -17,7 +17,7 @@ class AppointmentController extends Controller
         $appointments = Appointment::where('tenant_id', $request->user()->tenant_id)
             ->with(['lead', 'user', 'serviceType'])
             ->orderBy('start_time', 'asc')
-            ->get();
+            ->get();              
 
         return response()->json([
             'success' => true,
