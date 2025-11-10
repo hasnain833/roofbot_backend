@@ -18,10 +18,6 @@ use App\Http\Controllers\BillingController;
 Route::post('/auth/login', [LoginController::class, 'store']);
 Route::post('/auth/signup', [RegisteredUserController::class, 'store']);
 
-Route::post('/stripe/test', function (Request $request) {
-    \Log::info('🔥 Stripe Test Webhook Hit', ['data' => $request->all()]);
-    return response()->json(['status' => 'ok']);
-});
 
 
 Route::middleware(['auth:sanctum', 'admin'])->group(function () {
@@ -157,13 +153,13 @@ Route::middleware(['auth:sanctum', 'subscription'])->group(function () {
     Route::post('/twilio/send-message', [TwilioController::class, 'sendMessage']);
     Route::get('/twilio/messages/{leadId}', [TwilioController::class, 'getMessages']);
 
-    // Billing & Subscription Management
-    Route::get('/plans', [BillingController::class, 'plans']);
-    Route::get('/subscription', [BillingController::class, 'getSubscription']);
-    Route::post('/subscription/checkout', [BillingController::class, 'checkout']);
-    Route::post('/subscription/cancel', [BillingController::class, 'cancelSubscription']);
-    Route::post('/subscription/subscribe', [BillingController::class, 'subscribe']);
-    Route::post('/subscription/upgrade', [BillingController::class, 'upgradeSubscription']);
+    // // Billing & Subscription Management
+    // Route::get('/plans', [BillingController::class, 'plans']);
+    // Route::get('/subscription', [BillingController::class, 'getSubscription']);
+    // Route::post('/subscription/checkout', [BillingController::class, 'checkout']);
+    // Route::post('/subscription/cancel', [BillingController::class, 'cancelSubscription']);
+    // Route::post('/subscription/subscribe', [BillingController::class, 'subscribe']);
+    // Route::post('/subscription/upgrade', [BillingController::class, 'upgradeSubscription']);
 
     // CRM Jobs
     Route::apiResource('crm-jobs', CrmJobController::class);
