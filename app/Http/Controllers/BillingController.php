@@ -68,7 +68,7 @@ class BillingController extends Controller
             ],
         ];
 
-        if ($isNewUser) {
+        if ($isNewUser) {  
             $lineItems[] = [
                 'price_data' => [
                     'currency' => 'usd',
