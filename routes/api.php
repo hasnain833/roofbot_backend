@@ -18,6 +18,7 @@ use App\Http\Controllers\BillingController;
 Route::post('/auth/login', [LoginController::class, 'store']);
 Route::post('/auth/signup', [RegisteredUserController::class, 'store']);
 
+Route::get('/test-appointment/{id}', [AppointmentController::class, 'testWebhook']);
 
 
 Route::middleware(['auth:sanctum', 'admin'])->group(function () {
@@ -112,15 +113,6 @@ Route::middleware('auth:sanctum')->group(function () {
 Route::post('/stripe/webhook', [BillingController::class, 'stripeWebhook']);
 
 Route::middleware(['auth:sanctum', 'subscription'])->group(function () {
-    // Users
-    Route::apiResource('users', UserController::class);
-    Route::put('/users/{id}/update-password', [UserController::class, 'updatePassword']);
-    Route::get('/users/{id}', [UserController::class, 'show']);
-    Route::put('/users/{id}', [UserController::class, 'update']);
-    Route::delete('/users/{id}', [UserController::class, 'destroy']);
-    Route::get('/users', [UserController::class, 'index']);
-    Route::post('/users', [UserController::class, 'store']);
-
     // Leads
     Route::apiResource('leads', LeadController::class);
     Route::get('/leads', [LeadController::class, 'index']);
@@ -152,14 +144,6 @@ Route::middleware(['auth:sanctum', 'subscription'])->group(function () {
     // Twilio
     Route::post('/twilio/send-message', [TwilioController::class, 'sendMessage']);
     Route::get('/twilio/messages/{leadId}', [TwilioController::class, 'getMessages']);
-
-    // // Billing & Subscription Management
-    // Route::get('/plans', [BillingController::class, 'plans']);
-    // Route::get('/subscription', [BillingController::class, 'getSubscription']);
-    // Route::post('/subscription/checkout', [BillingController::class, 'checkout']);
-    // Route::post('/subscription/cancel', [BillingController::class, 'cancelSubscription']);
-    // Route::post('/subscription/subscribe', [BillingController::class, 'subscribe']);
-    // Route::post('/subscription/upgrade', [BillingController::class, 'upgradeSubscription']);
 
     // CRM Jobs
     Route::apiResource('crm-jobs', CrmJobController::class);

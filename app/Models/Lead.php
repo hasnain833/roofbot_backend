@@ -34,4 +34,10 @@ class Lead extends Model
     {
         return $this->belongsTo(User::class);
     }
+
+    public function serviceType()
+    {
+      return $this->belongsTo(\App\Models\ServiceType::class, 'service_type_id');
+    }
+
 }

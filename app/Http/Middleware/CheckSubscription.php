@@ -9,10 +9,14 @@ class CheckSubscription
 {
     public function handle(Request $request, Closure $next)
     {
+           if ($request->is('api/subscription/checkout')) {
+    return $next($request);
+}
         $user = $request->user();
         if ($user->email === 'griffinb@invictusconnect.com') {
             return $next($request);
         }
+     
 
         if ($user->subscription_status !== 'active') {
             return response()->json([

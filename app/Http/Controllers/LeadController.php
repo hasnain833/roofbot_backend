@@ -4,9 +4,15 @@ namespace App\Http\Controllers;
 
 use App\Helper;
 use App\Models\Lead;
+use App\Models\ServiceType;
+use App\Models\TenantAgentIntegration;
+use App\Models\TenantAgent;
 use Illuminate\Http\Request;
+use Twilio\Rest\Client;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+
 
 class LeadController extends Controller
 {
@@ -17,7 +23,7 @@ class LeadController extends Controller
             return response()->json(['error' => 'Tenant not found'], 400);
         }
 
-        $query = Lead::where('tenant_id', $tenant->id);
+        $query = Lead::where('tenant_id', $tenant->id)->with('serviceType');
 
         if ($search = $request->query('search')) {
             $query->where(function ($q) use ($search) {
@@ -29,65 +35,116 @@ class LeadController extends Controller
         }
 
         $leads = $query->orderBy('id', 'desc')->get();
-        return response()->json(['data' => $leads]);
+
+        $leadData = $leads->map(function($lead) {
+            return [
+                'id' => $lead->id,
+                'first_name' => $lead->first_name,
+                'last_name' => $lead->last_name,
+                'email' => $lead->email,
+                'phone' => $lead->phone,
+                'city' => $lead->city,
+                'zip'=>$lead->zip,
+                'country'=>$lead->country,
+                'status' => $lead->status,
+                'service_type' => optional($lead->serviceType)->name ?? 'Unspecified',
+            ];
+        });
+        return response()->json(['data' => $leadData]);
     }
 
-    public function store(Request $request)
-    {
-        $validated = $request->validate([
-            'first_name' => 'required|string',
-            'last_name'  => 'nullable|string',
-            'email'      => 'nullable|email',
-            'phone'      => 'nullable|string',
-            'address'    => 'nullable|string',
-            'city'       => 'nullable|string',
-            'state'      => 'nullable|string',
-            'zip'        => 'nullable|string',
-            'country'    => 'nullable|string',
-            'status'     => 'nullable|string',
-            'service_type' => 'nullable|string',
-        ]);
+   public function store(Request $request)
+{
+    $validated = $request->validate([
+        'first_name' => 'required|string',
+        'last_name'  => 'nullable|string',
+        'email'      => 'nullable|email',
+        'phone'      => 'nullable|string',
+        'address'    => 'nullable|string',
+        'city'       => 'nullable|string',
+        'state'      => 'nullable|string',
+        'zip'        => 'nullable|string',
+        'country'    => 'nullable|string',
+        'status'     => 'nullable|string',
+        'service_type_id' => 'nullable|exists:service_types,id',
+    ]);
 
-        $tenant = Helper::tenant();
-        if (!$tenant) {
-            return response()->json(['error' => 'Tenant not found'], 400);
-        }
+    $tenant = Helper::tenant();
+    if (!$tenant) {
+        return response()->json(['error' => 'Tenant not found'], 400);
+    }
 
-        $lead = Lead::create([
-            ...$validated,
-            'tenant_id' => $tenant->id,
-            'user_id'   => Auth::id(),
-        ]);
+    $lead = Lead::create([
+        ...$validated,
+        'tenant_id' => $tenant->id,
+        'user_id'   => Auth::id(),
+    ]);
 
-        try {
-            $webhookUrl = env('N8N_WEBHOOK_URL');
-            if ($webhookUrl) {
-                Http::post($webhookUrl, [
-                    'lead_id' => $lead->id,
-                    'first_name' => $lead->first_name,
-                    'last_name' => $lead->last_name,
-                    'email' => $lead->email,
-                    'phone' => $lead->phone,
-                    'city' => $lead->city,
-                    'service_type' => $lead->service_type,
-                    'tenant_id' => $tenant->id,
+     if ($lead->phone) {
+    $tenant_agent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
+$integration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->id)
+    ->where('provider', 'twilio')
+    ->first();
+
+     if ($integration) {
+            try {
+                $client = new Client($integration->key, $integration->secret);
+                $numbers = $client->incomingPhoneNumbers->read();
+                $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
+                $serviceName = optional($lead->serviceType)->name ?? 'our service';
+                $body = "Hello {$lead->first_name}, thank you for showing interest in {$serviceName}. We will contact you shortly!";
+
+                $client->messages->create($lead->phone, [
+                    'from' => $fromNumber,
+                    'body' => $body,
                 ]);
-            }
-        } catch (\Exception $e) {
-            \Log::error('N8N Webhook Error: '.$e->getMessage());
-        }
 
-        return response()->json(['message' => 'Lead created successfully', 'data' => $lead]);
+                // Log message
+                \App\Models\Message::create([
+                    'lead_id' => $lead->id,
+                    'text' => "Hello {$lead->first_name}, thank you for showing interest in "
+                              . optional($lead->serviceType)->name ?? 'our service',
+                    'out' => true,
+                    'status' => 'sent',
+                ]);
+
+            } catch (\Exception $e) {
+                Log::error("Twilio send failed: ".$e->getMessage());
+                // Don't crash the request, just return JSON with error
+                return response()->json([
+                    'message' => 'Lead created but failed to send SMS',
+                    'sms_error' => $e->getMessage(),
+                    'data' => $lead
+                ], 200);
+            }
+        }
     }
+
+    return response()->json([
+        'message' => 'Lead created successfully',
+        'data' => [
+            'id' => $lead->id,
+            'first_name' => $lead->first_name,
+            'last_name' => $lead->last_name,
+            'email' => $lead->email,
+            'phone' => $lead->phone,
+            'city' => $lead->city,
+            'state'=>$lead->state,
+            'zip'=>$lead->zip,
+            'country'=>$lead->country,
+            'status' => $lead->status,
+            'service_type' => optional($lead->serviceType)->name ?? 'Unspecified',
+        ]
+    ]);
+}
+
 
     public function summarize(Request $request)
     {
-        $leadId = $request->input('lead_id');
-        $lead = Lead::find($leadId);
+        $lead = Lead::with('serviceType')->find($request->input('lead_id'));
+        if (!$lead) return response()->json(['error' => 'Lead not found'], 404);
 
-        if (!$lead) {
-            return response()->json(['error' => 'Lead not found'], 404);
-        }
+        $serviceType = optional($lead->serviceType)->name ?? 'Unspecified';
 
         try {
             $prompt = "Summarize this lead's details in 2-3 short sentences:
@@ -95,13 +152,13 @@ class LeadController extends Controller
             Email: {$lead->email}
             Phone: {$lead->phone}
             City: {$lead->city}
-            Service Type: {$lead->service_type}";
+            Service Type: {$serviceType}";
 
             $response = Http::withToken(env('OPENAI_API_KEY'))
                 ->post('https://api.openai.com/v1/chat/completions', [
                     'model' => 'gpt-3.5-turbo',
                     'messages' => [
-                        ['role' => 'system', 'content' => 'You are an assistant that summarizes customer lead information.'],
+                        ['role' => 'system', 'content' => 'You summarize customer lead information.'],
                         ['role' => 'user', 'content' => $prompt],
                     ],
                     'max_tokens' => 100,
@@ -112,12 +169,10 @@ class LeadController extends Controller
 
             return response()->json(['summary' => $summary]);
         } catch (\Exception $e) {
-            return response()->json([
-                'error' => 'Failed to generate summary',
-                'message' => $e->getMessage(),
-            ], 500);
+            return response()->json(['error' => 'Failed to generate summary', 'message' => $e->getMessage()], 500);
         }
     }
+
 
     public function update(Request $request, Lead $lead)
     {
@@ -133,7 +188,7 @@ class LeadController extends Controller
             'zip'        => 'nullable|string',
             'country'    => 'nullable|string',
             'status'     => 'nullable|string',
-            'service_type' => 'nullable|string',
+            'service_type_id' => 'nullable|exists:service_types,id',
         ]);
 
         $lead->update($validated);

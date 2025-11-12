@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Twilio\Rest\Client;
+use Google\Client as GoogleClient;
 class AgentIntegrationController extends Controller
 {
     public function index()
@@ -24,32 +25,48 @@ public function updateGoogle(Request $request)
 {
     $request->validate([
         'provider' => 'required',
-        'key' => 'required',
+        'key' => 'required', // this is code from frontend
     ]);
 
     $tenant_agent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
 
-    if (!$tenant_agent) {
-        return response()->json(['error' => 'Tenant agent not found'], 404);
+    $code = $request->key; // authorization code
+    $client = new GoogleClient();
+    $client->setClientId(env('GOOGLE_CLIENT_ID'));
+    $client->setClientSecret(env('GOOGLE_CLIENT_SECRET'));
+    $client->setRedirectUri(env('GOOGLE_REDIRECT_URI'));
+    $client->setAccessType('offline'); // needed to get refresh token
+    $client->setScopes(['https://www.googleapis.com/auth/calendar']);
+
+    try {
+        $token = $client->fetchAccessTokenWithAuthCode($code);
+
+        if (isset($token['error'])) {
+            return response()->json(['error' => $token['error_description']], 400);
+        }
+
+        $integration = TenantAgentIntegration::updateOrCreate(
+            [
+                'tenant_agent_id' => $tenant_agent->id,
+                'provider' => 'google'
+            ],
+            [
+                'key' => $token['access_token'],
+                'secret' => $token['refresh_token'] ?? '',
+                'meta' => json_encode([
+                    'expires_in' => $token['expires_in'] ?? null,
+                    'created' => time()
+                ])
+            ]
+        );
+
+        return response()->json([
+            'message' => 'Google integration updated successfully',
+            'integration' => $integration
+        ]);
+    } catch (\Exception $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
     }
-
-    $integration = TenantAgentIntegration::updateOrCreate(
-        [
-            'tenant_agent_id' => $tenant_agent->id,
-            'provider' => $request->provider
-        ],
-        [
-            'key' => $request->key,
-            'secret' => $request->secret ?? '',
-            'meta' => json_encode([])
-        ]
-    );
-
-    return response()->json([
-        'message' => 'Google integration updated successfully',
-        'integration' => $integration
-    ]);
-    
 }
 public function updateTwilio(Request $request)
 {
@@ -84,6 +101,58 @@ public function updateTwilio(Request $request)
     return response()->json([
         'message' => 'Twilio connected successfully!',
         'integration' => $integration,
+    ]);
+}
+public function getGoogleAccessToken(Request $request)
+{
+    // Fetch tenant agent
+    $tenant_agent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
+    if (!$tenant_agent) {
+        return response()->json(['error' => 'Tenant agent not found'], 404);
+    }
+
+    // Fetch Google integration
+    $integration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->id)
+        ->where('provider', 'google')
+        ->first();
+
+    if (!$integration) {
+        return response()->json(['error' => 'Google integration not found'], 404);
+    }
+
+    $accessToken = $integration->key; 
+    if ($integration->secret) {
+        try {
+            $client = new GoogleClient();
+            $client->setClientId(env('GOOGLE_CLIENT_ID'));
+            $client->setClientSecret(env('GOOGLE_CLIENT_SECRET'));
+            $client->setAccessType('offline'); // important
+            $client->setScopes(['https://www.googleapis.com/auth/calendar']);
+            $client->refreshToken($integration->secret);
+
+            $accessTokenArray = $client->getAccessToken();
+            $accessToken = $accessTokenArray['access_token'] ?? $accessToken;
+
+            // Optionally, update stored access token and expiry in DB
+            $integration->update([
+                'key' => $accessToken,
+                'meta' => json_encode([
+                    'expires_in' => $accessTokenArray['expires_in'] ?? null,
+                    'updated_at' => now()->toDateTimeString()
+                ])
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to refresh Google access token',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    return response()->json([
+        'access_token' => $accessToken,
+        'refresh_token' => $integration->secret,
+        'tenant_agent_id' => $tenant_agent->id
     ]);
 }
 
@@ -128,11 +197,27 @@ public function getGoogleCredentials(Request $request)
         return response()->json(['error' => 'Google integration not found'], 404);
     }
 
-    return response()->json([
-        'key' => $integration->key,        // OAuth code / access token
-        'secret' => $integration->secret,  // Optional
-        'tenant_agent_id' => $tenant_agent->id
-    ]);
+   $integration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->id)
+    ->where('provider', 'google')
+    ->first();
+
+$accessToken = $integration->key;
+if ($integration->secret) {
+    $client = new GoogleClient();
+    $client->setClientId(env('GOOGLE_CLIENT_ID'));
+    $client->setClientSecret(env('GOOGLE_CLIENT_SECRET'));
+    $client->setAccessType('offline');
+    $client->setScopes(['https://www.googleapis.com/auth/calendar']);
+    $client->refreshToken($integration->secret);
+    $accessToken = $client->getAccessToken()['access_token'];
+}
+
+return response()->json([
+    'key' => $accessToken,
+    'secret' => $integration->secret,
+    'tenant_agent_id' => $tenant_agent->id
+]);
+
 }
 
 

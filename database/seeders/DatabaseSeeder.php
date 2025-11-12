@@ -12,6 +12,10 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
+        $this->call([
+            PlanSeeder::class,
+            ServiceTypeSeeder::class,
+        ]);
         // ──────────────────────────────────────────────────────────────
         // 1. Create the **company owner** – full access, no Stripe
         // ──────────────────────────────────────────────────────────────
