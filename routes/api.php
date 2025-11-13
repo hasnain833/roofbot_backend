@@ -18,7 +18,7 @@ use App\Http\Controllers\BillingController;
 Route::post('/auth/login', [LoginController::class, 'store']);
 Route::post('/auth/signup', [RegisteredUserController::class, 'store']);
 
-Route::get('/test-appointment/{id}', [AppointmentController::class, 'testWebhook']);
+// Route::get('/test-appointment/{id}', [AppointmentController::class, 'testWebhook']);
 
 
 Route::middleware(['auth:sanctum', 'admin'])->group(function () {
@@ -69,6 +69,8 @@ Route::middleware(['auth:sanctum','admin'])->group(function () {
     Route::post('/appointments', [AppointmentController::class, 'store']);
     Route::put('/appointments/{id}', [AppointmentController::class, 'update']);
     Route::delete('/appointments/{id}', [AppointmentController::class, 'destroy']);
+    Route::post('/appointments/{id}/convert-to-job', [AppointmentController::class, 'convertToJob']);
+    Route::get('/jobs', [CrmJobController::class, 'index']);
 });
 
 Route::middleware('auth:sanctum')->group(function () {

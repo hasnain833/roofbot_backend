@@ -17,124 +17,117 @@ class AppointmentController extends Controller
         $appointments = Appointment::where('tenant_id', $request->user()->tenant_id)
             ->with(['lead', 'user', 'serviceType'])
             ->orderBy('start_time', 'asc')
-            ->get();              
+            ->get();
 
         return response()->json([
             'success' => true,
             'data' => $appointments
         ]);
     }
-public function store(Request $request)
-{
-    $validated = $request->validate([
-        'lead_id' => 'nullable|exists:leads,id',
-        'title' => 'required|string|max:255',
-        'description' => 'nullable|string',
-        'notes' => 'nullable|string',
-        'service_type_id' => 'nullable|exists:service_types,id',
-        'start_time' => 'required|date',
-        'end_time' => 'required|date|after:start_time',
-    ]);
 
-    $validated['tenant_id'] = $request->user()->tenant_id;
-    $validated['user_id'] = $request->user()->id;
+    public function store(Request $request)
+    {
+        $validated = $request->validate([
+            'lead_id' => 'nullable|exists:leads,id',
+            'title' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'notes' => 'nullable|string',
+            'service_type_id' => 'nullable|exists:service_types,id',
+            'start_time' => 'required|date',
+            'end_time' => 'required|date|after:start_time',
+        ]);
 
-    $appointment = Appointment::create($validated);
+        $validated['tenant_id'] = $request->user()->tenant_id;
+        $validated['user_id'] = $request->user()->id;
 
-    try {
-        $lead = $appointment->lead;
-        $serviceType = optional($appointment->serviceType)->name;
+        $appointment = Appointment::create($validated);
 
-        // ✅ Fetch the actual tenant agent who owns Google integration
-        $tenantAgent = \App\Models\TenantAgent::where('tenant_id', $appointment->tenant_id)->first();
-        $integration = TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
-            ->where('provider', 'google')
-            ->first();
+        try {
+            $lead = $appointment->lead;
+            $serviceType = optional($appointment->serviceType)->name;
 
-        $accessToken = null;
+            $googleToken = TenantAgentIntegration::where('tenant_agent_id', $appointment->user_id)
+                ->where('provider', 'google')
+                ->value('key');
 
-        if ($integration) {
-            $client = new \Google\Client();
-            $client->setClientId(env('GOOGLE_CLIENT_ID'));
-            $client->setClientSecret(env('GOOGLE_CLIENT_SECRET'));
-            $client->setAccessType('offline');
-            $client->setScopes(['https://www.googleapis.com/auth/calendar']);
-
-            // Refresh access token if refresh token exists
-            if ($integration->secret) {
-                $client->refreshToken($integration->secret);
-                $accessToken = $client->getAccessToken()['access_token'];
-            } else {
-                $accessToken = $integration->key;
-            }
-        }
-
-        // Twilio integration (same as before)
-        $twilioIntegration = TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
+             $twilioIntegration = TenantAgentIntegration::where('tenant_agent_id', $appointment->user_id)
             ->where('provider', 'twilio')
             ->first();
 
-        // Prepare payload for n8n
-        $payload = [
-            'event' => 'appointment_created',
-            'fullName' => $lead ? trim($lead->first_name . ' ' . ($lead->last_name ?? '')) : null,
-            'userPhone' => $lead->phone ?? null,
-            'email' => $lead->email ?? null,
-            'serviceNeeded' => $serviceType ?? 'General Service',
-            'preferredDateTimeISO' => Carbon::parse($appointment->start_time)->toIso8601String(),
-            'windowEndISO' => Carbon::parse($appointment->end_time)->toIso8601String(),
-            'tenant_id' => $appointment->tenant_id,
-            'appointment_id' => $appointment->id,
-            'google_access_token' => $accessToken,
-            'twilio_sid' => $twilioIntegration?->key,
-            'twilio_token' => $twilioIntegration?->secret,
-        ];
+            $payload = [
+                'event' => 'appointment_created',
+                'fullName' => $lead ? trim($lead->first_name . ' ' . ($lead->last_name ?? '')) : null,
+                'userPhone' => $lead->phone ?? null,
+                'email' => $lead->email ?? null,
+                'serviceNeeded' => $serviceType ?? 'General Service',
+                'preferredDateTimeISO' => Carbon::parse($appointment->start_time)->toIso8601String(),
+                'windowEndISO' => Carbon::parse($appointment->end_time)->toIso8601String(),
+                'tenant_id' => $appointment->tenant_id,
+                'appointment_id' => $appointment->id,
+                'google_access_token' => $googleToken,
+                'twilio_sid' => $twilioIntegration?->key,
+                'twilio_token' => $twilioIntegration?->secret, 
+            ];
 
-        $webhookUrl = env('N8N_WEBHOOK_URL');
-        \Log::info('🌐 Sending appointment webhook to n8n', [
-            'url' => $webhookUrl,
-            'payload' => $payload
-        ]);
+            Http::withHeaders([
+                'Accept' => 'application/json',
+            ])->post(env('N8N_WEBHOOK_URL'), $payload);
 
-        $response = Http::withHeaders([
-            'Accept' => 'application/json',
-        ])->timeout(15)->post($webhookUrl, $payload);
-
-        \Log::info('✅ n8n webhook response', [
-            'status' => $response->status(),
-            'body' => $response->body()
-        ]);
-
-        if ($response->failed()) {
-            \Log::error('❌ n8n webhook failed', [
-                'status' => $response->status(),
-                'body' => $response->body()
-            ]);
+        } catch (\Exception $e) {
+            \Log::error('❌ Failed n8n webhook: ' . $e->getMessage());
         }
 
-    } catch (\Exception $e) {
-        \Log::error('❌ Failed to trigger n8n webhook', [
-            'error' => $e->getMessage(),
-            'trace' => $e->getTraceAsString()
+        // ✅ Google Calendar Sync Job
+        try {
+            dispatch(new SyncAppointmentToGoogle($appointment));
+        } catch (\Exception $e) {
+            \Log::error('❌ Failed Google Sync Job: ' . $e->getMessage());
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Appointment created successfully',
+            'data' => $appointment,
         ]);
+    }
+    public function convertToJob($id, Request $request)
+{
+    $tenant = Helper::tenant();
+    if (!$tenant) {
+        return response()->json(['error' => 'Tenant not found'], 400);
     }
 
-    // Google Calendar Sync Job
-    try {
-        dispatch(new SyncAppointmentToGoogle($appointment));
-    } catch (\Exception $e) {
-        \Log::error('❌ Failed Google Sync Job', [
-            'error' => $e->getMessage()
-        ]);
+    $appointment = Appointment::where('tenant_id', $tenant->id)
+        ->with('serviceType') // ← CRITICAL
+        ->findOrFail($id);
+
+    if (\App\Models\CrmJob::where('appointment_id', $appointment->id)->exists()) {
+        return response()->json(['error' => 'Job already exists for this appointment'], 400);
     }
+
+    $serviceTypeName = $appointment->serviceType?->name ?? 'General Service';
+
+    $job = \App\Models\CrmJob::create([
+        'tenant_id' => $tenant->id,
+        'lead_id' => $appointment->lead_id,
+        'appointment_id' => $appointment->id,
+        'user_id' => $request->user()->id,
+        'title' => $appointment->title,
+        'description' => $appointment->description,
+        'status' => 'Active',
+        'start_date' => $appointment->start_time,
+        'end_date' => $appointment->end_time,
+        'service_type' => $serviceTypeName,
+    ]);
+
+    $appointment->update(['status' => 'Converted to Job']);
 
     return response()->json([
         'success' => true,
-        'message' => 'Appointment created successfully',
-        'data' => $appointment,
+        'message' => 'Appointment converted to job successfully',
+        'data' => $job,
     ]);
 }
-
 
     public function update(Request $request, $id)
     {

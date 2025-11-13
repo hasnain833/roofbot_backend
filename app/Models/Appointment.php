@@ -44,9 +44,10 @@ class Appointment extends Model
     {
         return $this->belongsTo(Tenant::class);
     }
-    public function serviceType()
+ // app/Models/Appointment.php
+public function serviceType()
 {
-    return $this->belongsTo(ServiceType::class);
+    return $this->belongsTo(\App\Models\ServiceType::class, 'service_type_id');
 }
 
 }

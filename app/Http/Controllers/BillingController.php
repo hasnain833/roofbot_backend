@@ -46,11 +46,10 @@ class BillingController extends Controller
 
 
     // New Registration Subscription Checkout
-   public function checkout(Request $request)
+  public function checkout(Request $request)
 {
     $request->validate(['plan_id' => 'required|exists:plans,id']);
     $plan = Plan::findOrFail($request->plan_id);
-    $priceId = $plan->stripe_yearly_price_id ?? $plan->stripe_monthly_price_id;
     $user = $request->user();
 
     if (!$user) {
@@ -58,45 +57,52 @@ class BillingController extends Controller
     }
 
     try {
-        Stripe::setApiKey(env('STRIPE_SECRET'));
-        $isNewUser = !$user->subscription('default'); 
+        \Stripe\Stripe::setApiKey(env('STRIPE_SECRET'));
 
-        $lineItems = [
-            [
-                'price' => $priceId,
-                'quantity' => 1,
-            ],
-        ];
-
-        if ($isNewUser) {  
-            $lineItems[] = [
-                'price_data' => [
-                    'currency' => 'usd',
-                    'product_data' => [
-                        'name' => 'Startup Fee',
-                        'description' => 'One-time setup cost for new customers',
+        // ✅ If this is the PRO plan, use one-time payment mode
+        if (strtolower($plan->slug) === 'pro') {
+            $checkout = \Stripe\Checkout\Session::create([
+                'customer_email' => $user->email,
+                'line_items' => [[
+                    'price_data' => [
+                        'currency' => 'usd',
+                        'product_data' => [
+                            'name' => 'Pro Plan (1-Year Access)',
+                            'description' => 'One-time payment for 12 months access'
+                        ],
+                        'unit_amount' => intval($plan->yearly_price * 100),
                     ],
-                    'unit_amount' => 1000 * 100, 
-                ],
-                'quantity' => 1,
-            ];
+                    'quantity' => 1,
+                ]],
+                'mode' => 'payment', // ✅ one-time payment mode
+                'success_url' => env('FRONTEND_URL') . '/signin?paid=1',
+                'cancel_url'  => env('FRONTEND_URL') . '/signup?cancel=1',
+            ]);
+
+            return response()->json(['url' => $checkout->url]);
         }
 
-        $checkout = Session::create([
+        // 🔁 Otherwise, default to subscription for Starter plan
+        $priceId = $plan->stripe_yearly_price_id ?? $plan->stripe_monthly_price_id;
+
+        $checkout = \Stripe\Checkout\Session::create([
             'customer_email' => $user->email,
-            'line_items' => $lineItems,
+            'line_items' => [[
+                'price' => $priceId,
+                'quantity' => 1,
+            ]],
             'mode' => 'subscription',
             'success_url' => env('FRONTEND_URL') . '/signin?paid=1',
             'cancel_url'  => env('FRONTEND_URL') . '/signup?cancel=1',
         ]);
 
         return response()->json(['url' => $checkout->url]);
+
     } catch (\Exception $e) {
         \Log::error('Checkout session failed: ' . $e->getMessage());
         return response()->json(['message' => 'Failed to start checkout.'], 500);
     }
 }
-
 
     public function subscribe(Request $request)
     {
@@ -177,7 +183,33 @@ class BillingController extends Controller
         'object' => $event->data->object ?? null,
     ]);
     if ($event->type === 'checkout.session.completed') {
-        $session = $event->data->object;
+    $session = $event->data->object;
+    $email = $session->customer_details->email ?? null;
+
+    if (!$email) return response('No email', 400);
+
+    $user = User::where('email', $email)->first();
+    if (!$user) return response('User not found', 404);
+
+    // ✅ Check if one-time payment (Pro Plan)
+    if ($session->mode === 'payment') {
+        $plan = Plan::where('slug', 'pro')->first();
+        if ($plan) {
+            $user->plan_id = $plan->id;
+            $user->subscription_status = 'active';
+            $user->current_period_end = now()->addYear(); // one-year access
+            $user->save();
+        }
+
+        \Log::info('✅ Pro plan activated for one year (one-time payment)', [
+            'user' => $user->email,
+            'plan' => 'pro',
+        ]);
+
+        return response('OK', 200);
+    
+}
+
 
         try {
             $session = \Stripe\Checkout\Session::retrieve($session->id, [
