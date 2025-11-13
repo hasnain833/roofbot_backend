@@ -33,6 +33,7 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::put('/tenant/integration/{agent}', [AgentIntegrationController::class, 'update']);
     Route::post('/tenant/integration/update-google', [AgentIntegrationController::class, 'updateGoogle']);
     Route::post('/tenant/integration/update-twilio', [AgentIntegrationController::class, 'updateTwilio']);
+    Route::post('/tenant/integration/update-openai', [AgentIntegrationController::class, 'updateOpenAI']);
 
     Route::get('/tenant', [CompanyController::class, 'index']);
     Route::put('/tenant/{tenant}', [CompanyController::class, 'update']);

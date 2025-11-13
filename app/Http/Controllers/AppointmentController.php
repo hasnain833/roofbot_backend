@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Appointment;
+use App\Helper;
 use App\Models\TenantAgentIntegration;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -90,19 +91,32 @@ class AppointmentController extends Controller
             'data' => $appointment,
         ]);
     }
-    public function convertToJob($id, Request $request)
+  public function convertToJob($id, Request $request)
 {
     $tenant = Helper::tenant();
+
     if (!$tenant) {
-        return response()->json(['error' => 'Tenant not found'], 400);
+        \Log::warning('convertToJob: Tenant not resolved', [
+            'user_id' => $request->user()->id,
+            'role' => $request->user()->role ?? 'unknown',
+        ]);
+        return response()->json(['error' => 'Access denied: Invalid tenant'], 403);
     }
 
     $appointment = Appointment::where('tenant_id', $tenant->id)
-        ->with('serviceType') // ← CRITICAL
-        ->findOrFail($id);
+        ->with('serviceType')
+        ->find($id);
+
+    if (!$appointment) {
+        \Log::warning('convertToJob: Appointment not found in tenant', [
+            'appointment_id' => $id,
+            'tenant_id' => $tenant->id,
+        ]);
+        return response()->json(['error' => 'Appointment not found'], 404);
+    }
 
     if (\App\Models\CrmJob::where('appointment_id', $appointment->id)->exists()) {
-        return response()->json(['error' => 'Job already exists for this appointment'], 400);
+        return response()->json(['error' => 'Job already exists'], 400);
     }
 
     $serviceTypeName = $appointment->serviceType?->name ?? 'General Service';
@@ -128,7 +142,6 @@ class AppointmentController extends Controller
         'data' => $job,
     ]);
 }
-
     public function update(Request $request, $id)
     {
         $appointment = Appointment::findOrFail($id);

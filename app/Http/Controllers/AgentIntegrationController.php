@@ -103,6 +103,39 @@ public function updateTwilio(Request $request)
         'integration' => $integration,
     ]);
 }
+public function updateOpenAI(Request $request)
+{
+    $tenant_agent = \App\Models\TenantAgent::where('tenant_id', \App\Helper::tenant()->id)->first();
+
+    $request->validate([
+        'key' => 'required|string', // OpenAI API key
+    ]);
+
+    // Store the key under provider "openai"
+    $integration = \App\Models\TenantAgentIntegration::updateOrCreate(
+        [
+            'tenant_agent_id' => $tenant_agent->id,
+            'provider' => 'openai',
+        ],
+        [
+            'key' => $request->key,
+            'secret' => '', 
+            'meta' => json_encode(['note' => 'OpenAI API key']),
+        ]
+    );
+
+    return response()->json([
+        'message' => 'OpenAI API key saved successfully!',
+        'integration' => $integration,
+    ]);
+}
+public function getOpenAiKey()
+{
+    $integration = \App\Models\TenantAgentIntegration::first();
+    return response()->json(['key' => $integration->openai_api_key ?? null]);
+}
+
+
 public function getGoogleAccessToken(Request $request)
 {
     // Fetch tenant agent
