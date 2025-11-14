@@ -131,20 +131,18 @@ public function updateOpenAI(Request $request)
 }
 public function getOpenAiKey()
 {
-    $integration = \App\Models\TenantAgentIntegration::first();
+    $integration = TenantAgentIntegration::first();
     return response()->json(['key' => $integration->openai_api_key ?? null]);
 }
 
 
 public function getGoogleAccessToken(Request $request)
 {
-    // Fetch tenant agent
     $tenant_agent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
     if (!$tenant_agent) {
         return response()->json(['error' => 'Tenant agent not found'], 404);
     }
 
-    // Fetch Google integration
     $integration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->id)
         ->where('provider', 'google')
         ->first();
@@ -159,14 +157,13 @@ public function getGoogleAccessToken(Request $request)
             $client = new GoogleClient();
             $client->setClientId(env('GOOGLE_CLIENT_ID'));
             $client->setClientSecret(env('GOOGLE_CLIENT_SECRET'));
-            $client->setAccessType('offline'); // important
+            $client->setAccessType('offline'); 
             $client->setScopes(['https://www.googleapis.com/auth/calendar']);
             $client->refreshToken($integration->secret);
 
             $accessTokenArray = $client->getAccessToken();
             $accessToken = $accessTokenArray['access_token'] ?? $accessToken;
 
-            // Optionally, update stored access token and expiry in DB
             $integration->update([
                 'key' => $accessToken,
                 'meta' => json_encode([

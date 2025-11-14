@@ -55,23 +55,23 @@ class User extends Authenticatable
             
     }
 
-    public function tenants()
-    {
-        return $this->belongsToMany(Tenant::class, 'tenant_users');
-    }
+       public function tenants()
+{
+    return $this->belongsToMany(Tenant::class, 'tenant_users');
+}
 
-    public function tenant()
-    {
-        return $this->belongsTo(Tenant::class, 'id', 'user_id');
-    }
+public function tenant()
+{
+    return $this->belongsTo(Tenant::class, 'id', 'user_id');
+}
 
-    public function tenantUser()
-    {
-        return $this->belongsTo(TenantUser::class, 'id', 'user_id');
-    }
+public function tenantUser()
+{
+    return $this->belongsTo(TenantUser::class, 'user_id', 'id');
+}
 
-    public function leads()
-    {
-        return $this->hasMany(Lead::class);
-    }
+public function leads()
+{
+    return $this->hasMany(Lead::class);
+}
 }

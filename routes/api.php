@@ -36,7 +36,7 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::post('/tenant/integration/update-openai', [AgentIntegrationController::class, 'updateOpenAI']);
 
     Route::get('/tenant', [CompanyController::class, 'index']);
-    Route::put('/tenant/{tenant}', [CompanyController::class, 'update']);
+    Route::put('/tenant', [CompanyController::class, 'update']);
 });
 
 Route::middleware('auth:sanctum')->group(function () {
@@ -134,7 +134,7 @@ Route::middleware(['auth:sanctum', 'subscription'])->group(function () {
 
     // Company / Tenant
     Route::get('/tenant', [CompanyController::class, 'index']);
-    Route::put('/tenant/{tenant}', [CompanyController::class, 'update']);
+    Route::put('/tenant', [CompanyController::class, 'update']);
 
     // Integrations
     Route::get('/tenant/integration', [AgentIntegrationController::class, 'index']);

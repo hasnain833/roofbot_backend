@@ -9,25 +9,13 @@ class Helper
 {
     public static function tenant()
     {
-        return self::resolveTenant();
+        return app('tenant');
     }
-
     public static function resolveTenant()
     {
-        $user = Auth::user();
-        if (!$user) return null;
-
-        if ($user->role === 'superadmin') {
-            return Tenant::where('user_id', $user->id)->first();
+        if (Auth::user()->role == 'superadmin') {
+            return Tenant::where('user_id', Auth::user()->id)->first();
         }
-
-        if (method_exists($user, 'tenantUser')) {
-            $tenantUser = $user->tenantUser()->first();
-            if ($tenantUser) {
-                return Tenant::find($tenantUser->tenant_id);
-            }
-        }
-
-        return null;
+        return Tenant::where('id', Auth::user()->tenantUser->tenant_id)->first();
     }
 }

@@ -18,7 +18,8 @@ class CrmJob extends Model
         'status',        
         'start_date',
         'end_date',
-        'description'
+        'description',
+        'service_type',
     ];
 
     protected $casts = [
