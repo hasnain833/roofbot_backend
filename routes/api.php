@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\Auth\ProfileInformationController;
 use App\Http\Controllers\CompanyController;
+use App\Http\Controllers\ChatbotController;
 use Laravel\Fortify\Http\Controllers\RegisteredUserController;
 use App\Http\Controllers\LeadController;
 use App\Http\Controllers\TwilioController;
@@ -34,6 +35,8 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::post('/tenant/integration/update-google', [AgentIntegrationController::class, 'updateGoogle']);
     Route::post('/tenant/integration/update-twilio', [AgentIntegrationController::class, 'updateTwilio']);
     Route::post('/tenant/integration/update-openai', [AgentIntegrationController::class, 'updateOpenAI']);
+    
+Route::post('/tenant/integration/disconnect', [AgentIntegrationController::class, 'disconnect']);
 
     Route::get('/tenant', [CompanyController::class, 'index']);
     Route::put('/tenant', [CompanyController::class, 'update']);
@@ -70,8 +73,17 @@ Route::middleware(['auth:sanctum','admin'])->group(function () {
     Route::post('/appointments', [AppointmentController::class, 'store']);
     Route::put('/appointments/{id}', [AppointmentController::class, 'update']);
     Route::delete('/appointments/{id}', [AppointmentController::class, 'destroy']);
+    
+});
+ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/appointments/{id}/convert-to-job', [AppointmentController::class, 'convertToJob']);
     Route::get('/jobs', [CrmJobController::class, 'index']);
+    Route::put('/jobs/{id}', [CrmJobController::class, 'update']);
+    Route::delete('/jobs/{id}', [CrmJobController::class, 'destroy']);
+});
+
+Route::middleware(['auth:sanctum'])->group(function () {
+  Route::get('/chatbot/session-info', [ChatbotController::class, 'sessionInfo']);
 });
 
 Route::middleware('auth:sanctum')->group(function () {

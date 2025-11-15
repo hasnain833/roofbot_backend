@@ -249,6 +249,33 @@ return response()->json([
 ]);
 
 }
+public function disconnect(Request $request)
+{
+    $request->validate([
+        'provider' => 'required|string',
+    ]);
+
+    $tenant_agent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
+
+    if (!$tenant_agent) {
+        return response()->json(['error' => 'Tenant agent not found'], 404);
+    }
+
+    $integration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->id)
+        ->where('provider', $request->provider)
+        ->first();
+
+    if (!$integration) {
+        return response()->json(['message' => 'Integration already disconnected'], 200);
+    }
+
+    $integration->delete();
+
+    return response()->json([
+        'message' => ucfirst($request->provider) . ' disconnected successfully'
+    ]);
+}
+
 
 
 public function getTwilioCredentials(Request $request)

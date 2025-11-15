@@ -92,61 +92,61 @@ class AppointmentController extends Controller
             'message' => 'Appointment created successfully',
             'data' => $appointment,
         ]);
+    }
+public function convertToJob($id, Request $request)
+{
+    $tenant = $request->user()->tenant ?? Helper::tenant();
+
+    if (!$tenant) {
+        \Log::warning('convertToJob: Tenant not resolved', [
+            'user_id' => $request->user()->id,
+            'role' => $request->user()->role ?? 'unknown',
+        ]);
+        return response()->json(['error' => 'Access denied: Invalid tenant'], 403);
+    }
+
+    // ✅ Fetch appointment by tenant_id AND id (any user of tenant)
+    $appointment = Appointment::with('serviceType')
+        ->where('id', $id)
+        ->where('tenant_id', $tenant->id)
+        ->first();
+
+    if (!$appointment) {
+        \Log::warning('convertToJob: Appointment not found in tenant', [
+            'appointment_id' => $id,
+            'tenant_id' => $tenant->id,
+        ]);
+        return response()->json(['error' => 'Appointment not found'], 404);
+    }
+
+    if (\App\Models\CrmJob::where('appointment_id', $appointment->id)->exists()) {
+        return response()->json(['error' => 'Job already exists'], 400);
+    }
+
+   $serviceTypeName = $appointment->serviceType ? $appointment->serviceType->name : 'General Service';
+\Log::info('ServiceType', ['serviceType' => $appointment->serviceType]);
+
+$job = \App\Models\CrmJob::create([
+    'tenant_id' => $tenant->id,
+    'lead_id' => $appointment->lead_id,
+    'appointment_id' => $appointment->id,
+    'user_id' => $request->user()->id,
+    'title' => $appointment->title,
+    'description' => $appointment->description,
+    'status' => 'Active',
+    'start_date' => $appointment->start_time,
+    'end_date' => $appointment->end_time,
+    'service_type' => $serviceTypeName, 
+]);
+
+    $appointment->update(['status' => 'Converted to Job']);
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Appointment converted to job successfully',
+        'data' => $job,
+    ]);
 }
-// public function convertToJob($id, Request $request)
-// {
-//     $tenant = $request->user()->tenant ?? Helper::tenant();
-
-//     if (!$tenant) {
-//         \Log::warning('convertToJob: Tenant not resolved', [
-//             'user_id' => $request->user()->id,
-//             'role' => $request->user()->role ?? 'unknown',
-//         ]);
-//         return response()->json(['error' => 'Access denied: Invalid tenant'], 403);
-//     }
-
-//     // ✅ Fetch appointment by tenant_id AND id (any user of tenant)
-//     $appointment = Appointment::with('serviceType')
-//         ->where('id', $id)
-//         ->where('tenant_id', $tenant->id)
-//         ->first();
-
-//     if (!$appointment) {
-//         \Log::warning('convertToJob: Appointment not found in tenant', [
-//             'appointment_id' => $id,
-//             'tenant_id' => $tenant->id,
-//         ]);
-//         return response()->json(['error' => 'Appointment not found'], 404);
-//     }
-
-//     if (\App\Models\CrmJob::where('appointment_id', $appointment->id)->exists()) {
-//         return response()->json(['error' => 'Job already exists'], 400);
-//     }
-
-//    $serviceTypeName = $appointment->serviceType ? $appointment->serviceType->name : 'General Service';
-// \Log::info('ServiceType', ['serviceType' => $appointment->serviceType]);
-
-// $job = \App\Models\CrmJob::create([
-//     'tenant_id' => $tenant->id,
-//     'lead_id' => $appointment->lead_id,
-//     'appointment_id' => $appointment->id,
-//     'user_id' => $request->user()->id,
-//     'title' => $appointment->title,
-//     'description' => $appointment->description,
-//     'status' => 'Active',
-//     'start_date' => $appointment->start_time,
-//     'end_date' => $appointment->end_time,
-//     'service_type' => $serviceTypeName, 
-// ]);
-
-//     $appointment->update(['status' => 'Converted to Job']);
-
-//     return response()->json([
-//         'success' => true,
-//         'message' => 'Appointment converted to job successfully',
-//         'data' => $job,
-//     ]);
-// }
 
     public function update(Request $request, $id)
     {

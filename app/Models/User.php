@@ -67,7 +67,7 @@ public function tenant()
 
 public function tenantUser()
 {
-    return $this->belongsTo(TenantUser::class, 'user_id', 'id');
+    return $this->belongsTo(TenantUser::class, 'id', 'user_id');
 }
 
 public function leads()

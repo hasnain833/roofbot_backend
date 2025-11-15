@@ -20,7 +20,6 @@ class BillingController extends Controller
         ]);
     }
 
-    // Get current subscription info
   public function getSubscription(Request $request)
 {
     $user = $request->user();
@@ -45,7 +44,6 @@ class BillingController extends Controller
 }
 
 
-    // New Registration Subscription Checkout
   public function checkout(Request $request)
 {
     $request->validate(['plan_id' => 'required|exists:plans,id']);
@@ -59,7 +57,6 @@ class BillingController extends Controller
     try {
         \Stripe\Stripe::setApiKey(env('STRIPE_SECRET'));
 
-        // ✅ If this is the PRO plan, use one-time payment mode
         if (strtolower($plan->slug) === 'pro') {
             $checkout = \Stripe\Checkout\Session::create([
                 'customer_email' => $user->email,
@@ -74,15 +71,36 @@ class BillingController extends Controller
                     ],
                     'quantity' => 1,
                 ]],
-                'mode' => 'payment', // ✅ one-time payment mode
+                'mode' => 'payment', 
                 'success_url' => env('FRONTEND_URL') . '/signin?paid=1',
                 'cancel_url'  => env('FRONTEND_URL') . '/signup?cancel=1',
             ]);
 
             return response()->json(['url' => $checkout->url]);
         }
+         if (strtolower($plan->slug) === 'starter') {
+            $firstPayment = intval(($plan->monthly_price + $plan->setup_fee) * 100);
 
-        // 🔁 Otherwise, default to subscription for Starter plan
+            $checkout = \Stripe\Checkout\Session::create([
+                'customer_email' => $user->email,
+                'line_items' => [[
+                    'price_data' => [
+                        'currency' => 'usd',
+                        'product_data' => [
+                            'name' => 'Starter Plan',
+                            'description' => 'Starter plan has Setup fee of $1000',
+                        ],
+                        'unit_amount' => $firstPayment,
+                    ],
+                    'quantity' => 1,
+                ]],
+                'mode' => 'payment', 
+                'success_url' => env('FRONTEND_URL') . '/signin?paid=1',
+                'cancel_url'  => env('FRONTEND_URL') . '/signup?cancel=1',
+            ]);
+
+            return response()->json(['url' => $checkout->url]);
+        }
         $priceId = $plan->stripe_yearly_price_id ?? $plan->stripe_monthly_price_id;
 
         $checkout = \Stripe\Checkout\Session::create([
@@ -130,7 +148,7 @@ class BillingController extends Controller
         return response()->json(['url' => $checkout->url]);
     }
 
-    // Cancel subscription
+  
     public function cancelSubscription(Request $request)
     {
         $subscription = $request->user()->subscription('default');
@@ -143,7 +161,6 @@ class BillingController extends Controller
         ]);
     }
 
-    // Existing user upgrade
     public function upgradeSubscription(Request $request)
     {
         $request->validate(['plan_id' => 'required|exists:plans,id']);
@@ -164,7 +181,6 @@ class BillingController extends Controller
         ]);
     }
 
-    // Stripe webhook
     public function stripeWebhook(Request $request)
 {
     $payload = $request->getContent();
@@ -190,14 +206,31 @@ class BillingController extends Controller
 
     $user = User::where('email', $email)->first();
     if (!$user) return response('User not found', 404);
+    
+    if ($session->mode === 'payment') {
+    $plan = Plan::where('slug', 'starter')->first();
+    if ($plan) {
+        $user->plan_id = $plan->id;
+        $user->subscription_status = 'active';
+        $user->current_period_end = now()->addMonth(); 
+        $user->save();
+    }
 
-    // ✅ Check if one-time payment (Pro Plan)
+    \Log::info('✅ Starter plan first payment completed', [
+        'user' => $user->email,
+        'plan' => 'starter',
+        'amount' => $session->amount_total / 100,
+    ]);
+
+    return response('OK', 200);
+} 
+
     if ($session->mode === 'payment') {
         $plan = Plan::where('slug', 'pro')->first();
         if ($plan) {
             $user->plan_id = $plan->id;
             $user->subscription_status = 'active';
-            $user->current_period_end = now()->addYear(); // one-year access
+            $user->current_period_end = now()->addYear(); 
             $user->save();
         }
 

@@ -10,23 +10,40 @@ use Illuminate\Support\Facades\Auth;
 
 class CrmJobController extends Controller
 {
-    public function index(Request $request)
-    {
-        $tenant = Helper::tenant();
-        if (!$tenant) {
-            return response()->json(['error' => 'Tenant not found'], 400);
-        }
-
-        $jobs = CrmJob::where('tenant_id', $tenant->id)
-            ->with(['lead', 'appointment', 'user'])
-            ->orderBy('created_at', 'desc')
-            ->get();
-
-        return response()->json([
-            'success' => true,
-            'data' => $jobs,
-        ]);
+   public function index(Request $request)
+{
+    $tenant = Helper::tenant();
+    if (!$tenant) {
+        return response()->json(['error' => 'Tenant not found'], 400);
     }
+
+    $search = $request->input('search');
+    $sortBy = $request->input('sort_by', 'created_at');
+    $sortOrder = $request->input('sort_order', 'desc');
+    $perPage = $request->input('per_page', 10);
+
+    $query = CrmJob::where('tenant_id', $tenant->id)
+        ->with(['lead', 'appointment', 'user']);
+
+    if ($search) {
+        $query->where(function ($q) use ($search) {
+            $q->where('title', 'like', "%$search%")
+              ->orWhere('status', 'like', "%$search%")
+              ->orWhereHas('lead', function ($leadQuery) use ($search) {
+                  $leadQuery->where('first_name', 'like', "%$search%")
+                            ->orWhere('last_name', 'like', "%$search%");
+              });
+        });
+    }
+
+    $jobs = $query->orderBy($sortBy, $sortOrder)->paginate($perPage);
+
+    return response()->json([
+        'success' => true,
+        'data' => $jobs
+    ]);
+}
+
 
     public function store(Request $request)
     {
@@ -57,7 +74,6 @@ class CrmJobController extends Controller
             'end_date' => $validated['end_date'] ?? $appointment->end_time,
         ]);
 
-        // Optional: update appointment status
         $appointment->update(['status' => 'Converted to Job']);
 
         return response()->json([
