@@ -81,6 +81,21 @@ class LeadController extends Controller
         'tenant_id' => $tenant->id,
         'user_id'   => Auth::id(),
     ]);
+    $followupDays = [1, 3, 7]; // 1, 3, 7 days after lead creation
+foreach ($followupDays as $days) {
+    \App\Models\Followup::create([
+        'lead_id' => $lead->id,
+        'followup_date' => now()->addDays($days),
+        'note' => 'Automatic follow-up',
+    ]);
+}
+
+// --- Add reminder ---
+\App\Models\Reminder::create([
+    'lead_id' => $lead->id,
+    'reminder_date' => now()->addDay(), // e.g., 1 day after creation
+    'type' => 'appointment',
+]);
 
      if ($lead->phone) {
     $tenant_agent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
@@ -233,6 +248,20 @@ public function publicStore(Request $request)
         ...$validated,
         'user_id'   => null, 
     ]);
+    $followupDays = [1, 3, 5]; 
+foreach ($followupDays as $days) {
+    \App\Models\Followup::create([
+        'lead_id' => $lead->id,
+        'followup_date' => now()->addDays($days),
+        'note' => 'Automatic follow-up',
+    ]);
+}
+
+\App\Models\Reminder::create([
+    'lead_id' => $lead->id,
+    'reminder_date' => now()->addDay(), 
+    'type' => 'appointment',
+]);
 
     if ($lead->phone) {
         $tenant_agent = TenantAgent::where('tenant_id', $validated['tenant_id'])->first();

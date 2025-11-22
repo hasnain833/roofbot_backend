@@ -39,5 +39,15 @@ class Lead extends Model
     {
       return $this->belongsTo(\App\Models\ServiceType::class, 'service_type_id');
     }
+    public function followups()
+{
+    return $this->hasMany(Followup::class);
+}
+
+public function reminders()
+{
+    return $this->hasMany(Reminder::class);
+}
+
 
 }
