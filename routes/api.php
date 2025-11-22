@@ -19,8 +19,15 @@ use App\Http\Controllers\BillingController;
 Route::post('/auth/login', [LoginController::class, 'store']);
 Route::post('/auth/signup', [RegisteredUserController::class, 'store']);
 
-// Route::get('/test-appointment/{id}', [AppointmentController::class, 'testWebhook']);
-
+Route::post('/public/leads', [LeadController::class, 'publicStore']); 
+Route::post('/public/appointments', [AppointmentController::class, 'publicStore']);
+Route::put('/public/leads/{id}', [LeadController::class, 'publicUpdate']); 
+Route::put('/public/appointments/{id}', [AppointmentController::class, 'publicUpdate']);
+Route::get('/public/leads/{id}', [LeadController::class, 'publicShow']); 
+Route::get('/public/appointments/{id}', [AppointmentController::class, 'publicShow']); 
+Route::post('/public/appointments/{id}/convert-to-job', [AppointmentController::class, 'publicConvertToJob']);
+Route::get('/public/leads', [LeadController::class, 'publicIndex']);
+Route::get('/public/appointments', [AppointmentController::class, 'publicIndexByLead']); 
 
 Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::get('/users', [UserController::class, 'index']);

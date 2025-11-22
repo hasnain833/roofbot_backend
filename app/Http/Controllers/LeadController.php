@@ -211,4 +211,174 @@ $integration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->i
             abort(403, 'Unauthorized action.');
         }
     }
+
+public function publicStore(Request $request)
+{
+    $validated = $request->validate([
+        'tenant_id' => 'required|exists:tenants,id',
+        'first_name' => 'required|string',
+        'last_name'  => 'nullable|string',
+        'email'      => 'nullable|email',
+        'phone'      => 'nullable|string',
+        'address'    => 'nullable|string',
+        'city'       => 'nullable|string',
+        'state'      => 'nullable|string',
+        'zip'        => 'nullable|string',
+        'country'    => 'nullable|string',
+        'status'     => 'nullable|string',
+        'service_type_id' => 'nullable|exists:service_types,id',
+    ]);
+
+    $lead = Lead::create([
+        ...$validated,
+        'user_id'   => null, 
+    ]);
+
+    if ($lead->phone) {
+        $tenant_agent = TenantAgent::where('tenant_id', $validated['tenant_id'])->first();
+        $integration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->id)
+            ->where('provider', 'twilio')
+            ->first();
+
+        if ($integration) {
+            try {
+                $client = new Client($integration->key, $integration->secret);
+                $numbers = $client->incomingPhoneNumbers->read();
+                $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
+                $serviceName = optional($lead->serviceType)->name ?? 'our service';
+                $body = "Hello {$lead->first_name}, thank you for showing interest in {$serviceName}. We will contact you shortly!";
+
+                $client->messages->create($lead->phone, [
+                    'from' => $fromNumber,
+                    'body' => $body,
+                ]);
+
+                \App\Models\Message::create([
+                    'lead_id' => $lead->id,
+                    'text' => $body,
+                    'out' => true,
+                    'status' => 'sent',
+                ]);
+            } catch (\Exception $e) {
+                Log::error("Twilio send failed: ".$e->getMessage());
+                return response()->json([
+                    'message' => 'Lead created but failed to send SMS',
+                    'sms_error' => $e->getMessage(),
+                    'data' => $lead
+                ], 200);
+            }
+        }
+    }
+
+    return response()->json([
+        'message' => 'Lead created successfully',
+        'data' => [
+            'id' => $lead->id,
+           'first_name' => $lead->first_name,
+            'last_name' => $lead->last_name,
+            'email' => $lead->email,
+            'phone' => $lead->phone,
+            'city' => $lead->city,
+            'state'=>$lead->state,
+            'zip'=>$lead->zip,
+            'country'=>$lead->country,
+            'status' => $lead->status,
+            'service_type' => optional($lead->serviceType)->name ?? 'Unspecified',
+        ]
+    ]);
+}
+
+public function publicUpdate(Request $request, $id)
+{
+    $validated = $request->validate([
+        'tenant_id' => 'required|exists:tenants,id',
+          'first_name' => 'required|string',
+            'last_name'  => 'nullable|string',
+            'email'      => 'nullable|email',
+            'phone'      => 'nullable|string',
+            'address'    => 'nullable|string',
+            'city'       => 'nullable|string',
+            'state'      => 'nullable|string',
+            'zip'        => 'nullable|string',
+            'country'    => 'nullable|string',
+            'status'     => 'nullable|string',
+            'service_type_id' => 'nullable|exists:service_types,id',
+    ]);
+
+    $lead = Lead::findOrFail($id);
+    if ($lead->tenant_id !== $validated['tenant_id']) {
+        return response()->json(['error' => 'Unauthorized: Tenant mismatch'], 403);
+    }
+
+    $lead->update($validated);
+    return response()->json(['message' => 'Lead updated successfully', 'data' => $lead]);
+}
+
+public function publicShow(Request $request, $id)
+{
+    $tenantId = $request->query('tenant_id');
+    if (!$tenantId) {
+        return response()->json(['error' => 'tenant_id required'], 400);
+    }
+
+    $lead = Lead::where('id', $id)->where('tenant_id', $tenantId)->with('serviceType')->first();
+    if (!$lead) {
+        return response()->json(['error' => 'Lead not found'], 404);
+    }
+
+    return response()->json(['data' => [
+       'id' => $lead->id,
+    'first_name' => $lead->first_name,
+    'last_name' => $lead->last_name,
+    'email' => $lead->email,
+    'address' => $lead->address,
+    'phone' => $lead->phone,
+    'city' => $lead->city,
+    'state' => $lead->state,
+    'zip' => $lead->zip,
+    'country' => $lead->country,
+    'status' => $lead->status,
+    'service_type' => optional($lead->serviceType)->name ?? 'Unspecified',
+    ]]);
+}
+
+public function publicIndex(Request $request)
+{
+    $tenantId = $request->query('tenant_id');
+    if (!$tenantId) {
+        return response()->json(['error' => 'tenant_id required'], 400);
+    }
+
+    $query = Lead::where('tenant_id', $tenantId)->with('serviceType');
+
+  
+        if ($search = $request->query('search')) {
+            $query->where(function ($q) use ($search) {
+                $q->where('first_name', 'like', "%{$search}%")
+                    ->orWhere('last_name', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%")
+                    ->orWhere('phone', 'like', "%{$search}%");
+            });
+        }
+
+ $leads = $query->orderBy('id', 'desc')->get();
+
+        $leadData = $leads->map(function($lead) {
+            return [
+                'id' => $lead->id,
+                'first_name' => $lead->first_name,
+                'last_name' => $lead->last_name,
+                'email' => $lead->email,
+                'address' => $lead->address,
+                'phone' => $lead->phone,
+                'city' => $lead->city,
+                'state' => $lead->state,  
+                'zip'=>$lead->zip,
+                'country'=>$lead->country,
+                'status' => $lead->status,
+                'service_type' => optional($lead->serviceType)->name ?? 'Unspecified',
+            ];
+        });
+        return response()->json(['data' => $leadData]);
+    }
 }
