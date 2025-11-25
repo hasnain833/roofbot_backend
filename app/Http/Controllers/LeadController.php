@@ -81,19 +81,20 @@ class LeadController extends Controller
         'tenant_id' => $tenant->id,
         'user_id'   => Auth::id(),
     ]);
-    $followupDays = [1, 3, 7]; // 1, 3, 7 days after lead creation
-foreach ($followupDays as $days) {
+   $followupMinutes = [1, 3, 6];
+
+foreach ($followupMinutes as $minutes) {
     \App\Models\Followup::create([
         'lead_id' => $lead->id,
-        'followup_date' => now()->addDays($days),
-        'note' => 'Automatic follow-up',
+        'followup_date' => now()->addMinutes($minutes),
+        'attempt_number' => 1,
+        'type' => 'NEW', 
+        'sent' => false,
     ]);
 }
-
-// --- Add reminder ---
 \App\Models\Reminder::create([
     'lead_id' => $lead->id,
-    'reminder_date' => now()->addDay(), // e.g., 1 day after creation
+    'reminder_date' => now()->addDay(), 
     'type' => 'appointment',
 ]);
 
@@ -101,7 +102,7 @@ foreach ($followupDays as $days) {
     $tenant_agent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
 $integration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->id)
     ->where('provider', 'twilio')
-    ->first();
+    ->first();    
 
      if ($integration) {
             try {
@@ -109,14 +110,13 @@ $integration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->i
                 $numbers = $client->incomingPhoneNumbers->read();
                 $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
                 $serviceName = optional($lead->serviceType)->name ?? 'our service';
-                $body = "Hello {$lead->first_name}, thank you for showing interest in {$serviceName}. We will contact you shortly!";
+                $body = "Hello {$lead->first_name}, thank you for showing interest in {$serviceName}. when would you like to book an appointment.!";
 
                 $client->messages->create($lead->phone, [
                     'from' => $fromNumber,
                     'body' => $body,
                 ]);
 
-                // Log message
                 \App\Models\Message::create([
                     'lead_id' => $lead->id,
                     'text' => "Hello {$lead->first_name}, thank you for showing interest in "
@@ -127,7 +127,6 @@ $integration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->i
 
             } catch (\Exception $e) {
                 Log::error("Twilio send failed: ".$e->getMessage());
-                // Don't crash the request, just return JSON with error
                 return response()->json([
                     'message' => 'Lead created but failed to send SMS',
                     'sms_error' => $e->getMessage(),

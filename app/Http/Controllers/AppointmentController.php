@@ -188,7 +188,7 @@ public function publicStore(Request $request)
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
             'notes' => 'nullable|string',
-            'service_type_id' => 'nullable|exists:service_types,id',
+            'serviceType' => 'nullable|string',
             'start_time' => 'required|date',
             'end_time' => 'required|date|after:start_time',
     ]);
@@ -197,7 +197,6 @@ public function publicStore(Request $request)
 
     $appointment = Appointment::create($validated);
 
-    try {
        try {
             $lead = $appointment->lead;
             $serviceType = optional($appointment->serviceType)->name;
@@ -244,7 +243,6 @@ public function publicStore(Request $request)
         'message' => 'Appointment created successfully',
         'data' => $appointment,
     ]);
-    }
 }
 
 public function publicUpdate(Request $request, $id)
