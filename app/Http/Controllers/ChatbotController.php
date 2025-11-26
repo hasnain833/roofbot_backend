@@ -51,4 +51,25 @@ class ChatbotController extends Controller
             'ip_address' => $ipAddress,
         ]);
     }
+    public function sessionInfoIframe(Request $request)
+{
+    $companyName = $request->query('company'); 
+    $tenant = \App\Models\Tenant::where('company', $companyName)->first();
+
+    if (!$tenant) {
+        return response()->json(['error' => 'Tenant not found'], 404);
+    }
+
+    $agent = $tenant->agents()->where('status','active')->first();
+
+    $sessionId = md5($request->ip() . '_' . time() . '_' . Str::uuid() . '_' . Str::random(8));
+
+    return response()->json([
+        'agent_id' => $agent ? $agent->id : null,
+        'session_id' => $sessionId,
+        'ip_address' => $request->ip(),
+    ]);
+}
+
+    
 }

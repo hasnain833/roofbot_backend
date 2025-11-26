@@ -49,6 +49,8 @@ Route::post('/tenant/integration/disconnect', [AgentIntegrationController::class
     Route::put('/tenant', [CompanyController::class, 'update']);
 });
 
+// Route::get('/chatbot/{botToken}', [ChatbotController::class, 'iframeChatbot']);
+
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/profile/update', [UserController::class, 'updateProfile']);
     Route::put('/profile/password/update', [UserController::class, 'updatePasswordProfile']);
@@ -92,6 +94,7 @@ Route::middleware(['auth:sanctum','admin'])->group(function () {
 Route::middleware(['auth:sanctum'])->group(function () {
   Route::get('/chatbot/session-info', [ChatbotController::class, 'sessionInfo']);
 });
+Route::get('/chatbot/session-info-iframe', [ChatbotController::class, 'sessionInfoIframe']);
 
 Route::middleware('auth:sanctum')->group(function () {
     
@@ -151,9 +154,9 @@ Route::middleware(['auth:sanctum', 'subscription'])->group(function () {
     Route::get('/dashboard/stats', [DashboardController::class, 'stats']);
     Route::get('/dashboard/summary', [DashboardController::class, 'summary']);
 
-    // Company / Tenant
-    Route::get('/tenant', [CompanyController::class, 'index']);
-    Route::put('/tenant', [CompanyController::class, 'update']);
+    // // Company / Tenant
+    // Route::get('/tenant', [CompanyController::class, 'index']);
+    // Route::put('/tenant', [CompanyController::class, 'update']);
 
     // Integrations
     Route::get('/tenant/integration', [AgentIntegrationController::class, 'index']);
