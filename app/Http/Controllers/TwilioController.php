@@ -21,7 +21,7 @@ class TwilioController extends Controller
     ]);
 
     try {
-        // 🔹 Find tenant agent and Twilio integration
+  
         $tenantAgent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
         $integration = TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
             ->where('provider', 'twilio')
@@ -135,8 +135,6 @@ class TwilioController extends Controller
     }
 }
 
-
-    // ✅ 3. Get chat messages for a lead
     public function getMessages($leadId)
     {
         $messages = Message::where('lead_id', $leadId)

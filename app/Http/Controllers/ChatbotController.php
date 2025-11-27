@@ -51,25 +51,36 @@ class ChatbotController extends Controller
             'ip_address' => $ipAddress,
         ]);
     }
-    public function sessionInfoIframe(Request $request)
+   // ChatbotController.php
+public function sessionInfoIframe(Request $request)
 {
-    $companyName = $request->query('company'); 
-    $tenant = \App\Models\Tenant::where('company', $companyName)->first();
+    $token = $request->query('token');
+    if (!$token) {
+        return response()->json(['error' => 'Missing token'], 400);
+    }
 
+    $chatbot = \App\Models\Chatbot::where('bot_token', $token)->first();
+    if (!$chatbot) {
+        return response()->json(['error' => 'Chatbot not found'], 404);
+    }
+
+    $tenant = $chatbot->tenant; 
     if (!$tenant) {
         return response()->json(['error' => 'Tenant not found'], 404);
     }
 
-    $agent = $tenant->agents()->where('status','active')->first();
+    $agent = $tenant->agents()->where('status', 'active')->first();
 
     $sessionId = md5($request->ip() . '_' . time() . '_' . Str::uuid() . '_' . Str::random(8));
 
     return response()->json([
-        'agent_id' => $agent ? $agent->id : null,
+        'agent_id'   => $agent ? $agent->id : null,
         'session_id' => $sessionId,
         'ip_address' => $request->ip(),
+        'company'    => $tenant->company, 
     ]);
 }
+
 
     
 }

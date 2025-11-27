@@ -62,7 +62,7 @@ class CompanyController extends Controller
         ]
     );
 
-    $iframeUrl = url('/chatbot/' . $chatbot->bot_token);
+    $iframeUrl = url('/yourchatbot/' . $chatbot->bot_token);
 
     $chatbot->update([
         'iframe_url' => $iframeUrl,
