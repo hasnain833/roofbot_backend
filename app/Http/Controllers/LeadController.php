@@ -81,17 +81,18 @@ class LeadController extends Controller
         'tenant_id' => $tenant->id,
         'user_id'   => Auth::id(),
     ]);
-   $followupMinutes = [1, 3, 6];
+  $followupDays = [1, 3, 5];
 
-foreach ($followupMinutes as $minutes) {
+foreach ($followupDays as $days) {
     \App\Models\Followup::create([
         'lead_id' => $lead->id,
-        'followup_date' => now()->addMinutes($minutes),
+        'followup_date' => now()->addDays($days),
         'attempt_number' => 1,
-        'type' => 'NEW', 
+        'type' => 'NEW',
         'sent' => false,
     ]);
 }
+
 \App\Models\Reminder::create([
     'lead_id' => $lead->id,
     'reminder_date' => now()->addDay(), 
@@ -247,14 +248,18 @@ public function publicStore(Request $request)
         ...$validated,
         'user_id'   => null, 
     ]);
-    $followupDays = [1, 3, 5]; 
+  $followupDays = [1, 3, 5];
+
 foreach ($followupDays as $days) {
     \App\Models\Followup::create([
         'lead_id' => $lead->id,
         'followup_date' => now()->addDays($days),
-        'note' => 'Automatic follow-up',
+        'attempt_number' => 1,
+        'type' => 'NEW',
+        'sent' => false,
     ]);
 }
+
 
 \App\Models\Reminder::create([
     'lead_id' => $lead->id,

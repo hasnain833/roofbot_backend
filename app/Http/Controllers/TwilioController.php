@@ -31,14 +31,11 @@ class TwilioController extends Controller
             return response()->json(['error' => 'Twilio integration not found'], 404);
         }
 
-        // 🔹 Initialize Twilio client with dynamic credentials
         $client = new Client($integration->key, $integration->secret);
 
-        // 🔹 Dynamically get the Twilio number
         $numbers = $client->incomingPhoneNumbers->read();
         $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
 
-        // 🔹 Send message
         $message = $client->messages->create(
             $request->to,
             [
@@ -47,7 +44,6 @@ class TwilioController extends Controller
             ]
         );
 
-        // 🔹 Save message in DB
         Message::create([
             'lead_id' => $request->lead_id ?? null,
             'text' => $request->message,
@@ -71,12 +67,11 @@ class TwilioController extends Controller
 {
     Log::info('📩 Inbound SMS received:', $request->all());
 
-    $from = $request->input('From'); // Lead’s phone (sender)
-    $to   = $request->input('To');   // Your Twilio number
+    $from = $request->input('From');
+    $to   = $request->input('To');   
     $body = $request->input('Body');
 
     try {
-        // 🔹 Step 1: Find Twilio integration whose account owns the $to number
         $integration = null;
         $integrations = TenantAgentIntegration::where('provider', 'twilio')->get();
 
@@ -88,7 +83,7 @@ class TwilioController extends Controller
                 foreach ($numbers as $num) {
                     if ($num->phoneNumber === $to) {
                         $integration = $item;
-                        break 2; // found correct integration
+                        break 2; 
                     }
                 }
             } catch (\Exception $e) {
@@ -118,7 +113,6 @@ class TwilioController extends Controller
             return response('No lead found', 200);
         }
 
-        // 🔹 Step 4: Save inbound message
         Message::create([
             'lead_id' => $lead->id,
             'text'    => $body,
