@@ -36,11 +36,14 @@ class TwilioController extends Controller
         $numbers = $client->incomingPhoneNumbers->read();
         $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
 
+         $callbackUrl = env('APP_URL') . '/api/twilio/status';
+
         $message = $client->messages->create(
             $request->to,
             [
                 'from' => $fromNumber,
                 'body' => $request->message,
+                'statusCallback' => $callbackUrl,
             ]
         );
 
@@ -49,6 +52,7 @@ class TwilioController extends Controller
             'text' => $request->message,
             'out' => true,
             'status' => $message->status,
+            'sid' => $message->sid,
         ]);
 
         return response()->json([
@@ -137,4 +141,18 @@ class TwilioController extends Controller
 
         return response()->json($messages);
     }
+    // TwilioController.php
+public function statusCallback(Request $request)
+{
+    Log::info('Twilio status callback', $request->all());
+
+    $message = Message::where('sid', $request->MessageSid)->first();
+    if ($message) {
+        $message->status = $request->MessageStatus;
+        $message->save();
+    }
+
+    return response()->json(['success' => true]);
+}
+
 }

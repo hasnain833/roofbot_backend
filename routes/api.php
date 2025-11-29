@@ -62,12 +62,14 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/leads', [LeadController::class, 'index']);
 
 });
-
+ 
 
 Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::post('/twilio/send-message', [TwilioController::class, 'sendMessage']);
     Route::get('/twilio/messages/{leadId}', [TwilioController::class, 'getMessages']);
 });
+
+Route::post('/twilio/status', [TwilioController::class, 'statusCallback']);
 
 Route::post('/twilio/inbound', [TwilioController::class, 'inbound']);
 
@@ -134,7 +136,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/subscription/subscribe', [BillingController::class, 'subscribe']);
     Route::post('/subscription/upgrade', [BillingController::class, 'upgradeSubscription']);
 });
-
 Route::post('/stripe/webhook', [BillingController::class, 'stripeWebhook']);
 
 Route::middleware(['auth:sanctum', 'subscription'])->group(function () {

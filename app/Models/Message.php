@@ -10,6 +10,6 @@ class Message extends Model
     use HasFactory;
 
     protected $fillable = [
-        'lead_id', 'text', 'out', 'status'
+        'lead_id', 'text', 'out', 'status','sid'
     ];
 }
