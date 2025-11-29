@@ -122,64 +122,171 @@ class BillingController extends Controller
     }
 }
 
-    public function subscribe(Request $request)
-    {
-        $request->validate(['plan_id' => 'required|exists:plans,id']);
-        $plan    = Plan::findOrFail($request->plan_id);
+   public function subscribe(Request $request)
+{
+    $request->validate(['plan_id' => 'required|exists:plans,id']);
+    $plan = Plan::findOrFail($request->plan_id);
+    $user = $request->user();
+
+    if (!$user) {
+        return response()->json(['message' => 'Unauthenticated'], 401);
+    }
+
+    try {
+        \Stripe\Stripe::setApiKey(env('STRIPE_SECRET'));
+
+        // One-time Starter / Pro plans for resubscribe (no setup fee)
+        if (strtolower($plan->slug) === 'starter' || strtolower($plan->slug) === 'pro') {
+            $amount = 0;
+            $name = '';
+            $description = '';
+
+            if (strtolower($plan->slug) === 'starter') {
+                $amount = intval($plan->monthly_price * 100); // ✅ no setup fee
+                $name = 'Starter Plan';
+                $description = 'Resubscribe to Starter Plan';
+            } else {
+                $amount = intval($plan->yearly_price * 100);
+                $name = 'Pro Plan (1-Year Access)';
+                $description = 'Resubscribe to Pro Plan (one-time yearly payment)';
+            }
+
+            $checkout = \Stripe\Checkout\Session::create([
+                'customer_email' => $user->email,
+                'line_items' => [[
+                    'price_data' => [
+                        'currency' => 'usd',
+                        'product_data' => [
+                            'name' => $name,
+                            'description' => $description
+                        ],
+                        'unit_amount' => $amount,
+                    ],
+                    'quantity' => 1,
+                ]],
+                'mode' => 'payment',
+                'success_url' => env('FRONTEND_URL') . '/dashboard/profile?paid=1',
+                'cancel_url'  => env('FRONTEND_URL') . '/dashboard/profile?cancel=1',
+                'metadata' => [
+                    'plan_id' => $plan->id,
+                    'user_id' => $user->id,
+                ],
+            ]);
+
+            return response()->json(['url' => $checkout->url]);
+        }
+
+        // Fallback for other recurring plans (if any)
         $priceId = $plan->stripe_yearly_price_id ?? $plan->stripe_monthly_price_id;
-        $user    = $request->user();
-
-        $subscription = $user->newSubscription('default', $priceId)
-            ->trialDays(0)
-            ->create();
-
-        $isYearly = str_contains($priceId, 'year');
-        $user->plan_id             = $plan->id;
-        $user->subscription_status = 'active';
-        $user->stripe_customer_id  = $subscription->stripe_id;
-        $user->current_period_end  = $isYearly ? now()->addYear() : now()->addMonth();
-        $user->save();
-
         $checkout = $user->checkout($priceId, [
             'success_url' => env('FRONTEND_URL') . '/dashboard/profile?subscribed=1',
             'cancel_url'  => env('FRONTEND_URL') . '/dashboard/profile?cancel=1',
         ]);
 
         return response()->json(['url' => $checkout->url]);
+
+    } catch (\Exception $e) {
+        \Log::error('Subscribe failed: ' . $e->getMessage());
+        return response()->json(['message' => 'Failed to start checkout: ' . $e->getMessage()], 500);
     }
+}
 
   
-    public function cancelSubscription(Request $request)
-    {
-        $subscription = $request->user()->subscription('default');
-        $subscription->cancel();
+ public function cancelSubscription(Request $request)
+{
+    $user = $request->user();
 
-        return response()->json([
-            'message'       => 'Subscription will end at the current period.',
-            'stripe_status' => $subscription->stripe_status,
-            'ends_at'       => $subscription->ends_at?->toDateString(),
-        ]);
+    if (!$user) {
+        return response()->json(['message' => 'Unauthenticated'], 401);
     }
 
-    public function upgradeSubscription(Request $request)
-    {
-        $request->validate(['plan_id' => 'required|exists:plans,id']);
-        $plan    = Plan::findOrFail($request->plan_id);
+    if (!$user->plan_id) {
+        return response()->json([
+            'message' => 'No active subscription.',
+            'stripe_status' => 'none'
+        ], 404);
+    }
+
+    $user->subscription_status = 'canceled';
+    $user->save();
+
+    return response()->json([
+        'message' => 'Subscription is cancelled. You will still have access until the end of your billing period.',
+        'stripe_status' => 'canceled',
+        'access_until' => $user->current_period_end,
+        'plan_name' => $user->plan->name ?? null,
+    ]);
+}
+
+public function upgradeSubscription(Request $request)
+{
+    $request->validate(['plan_id' => 'required|exists:plans,id']);
+    $plan = Plan::findOrFail($request->plan_id);
+    $user = $request->user();
+
+    if (!$user) {
+        return response()->json(['message' => 'Unauthenticated'], 401);
+    }
+
+    try {
+        \Stripe\Stripe::setApiKey(env('STRIPE_SECRET'));
+
+        // If upgrading to PRO → one-time payment
+        if (strtolower($plan->slug) === 'pro') {
+
+            $checkout = \Stripe\Checkout\Session::create([
+                'customer_email' => $user->email,
+                'mode' => 'payment',
+                'line_items' => [[
+                    'price_data' => [
+                        'currency' => 'usd',
+                        'product_data' => [
+                            'name' => 'Pro Plan (1-Year Access)',
+                        ],
+                        'unit_amount' => intval($plan->yearly_price * 100),
+                    ],
+                    'quantity' => 1,
+                ]],
+                'metadata' => [
+                    'upgrade' => true,
+                    'user_id' => $user->id,
+                    'plan_id' => $plan->id,
+                ],
+                'success_url' => env('FRONTEND_URL') . '/dashboard/profile?subscribed=1',
+                'cancel_url'  => env('FRONTEND_URL') . '/dashboard/profile?cancel=1',
+            ]);
+
+            return response()->json(['url' => $checkout->url]);
+        }
+
+        // For normal subscription-based plans
         $priceId = $plan->stripe_yearly_price_id ?? $plan->stripe_monthly_price_id;
 
-        $user = $request->user();
-        $user->subscription('default')->swap($priceId);
-
-        $isYearly = str_contains($priceId, 'year');
-        $user->plan_id            = $plan->id;
-        $user->current_period_end = $isYearly ? now()->addYear() : now()->addMonth();
-        $user->save();
-
-        return response()->json([
-            'message'  => 'Plan upgraded',
-            'redirect' => '/dashboard/profile?upgraded=1',
+        $session = \Stripe\Checkout\Session::create([
+            'customer_email' => $user->email,
+            'mode' => 'subscription',
+            'line_items' => [[
+                'price' => $priceId,
+                'quantity' => 1,
+            ]],
+            'subscription_data' => [
+                'metadata' => [
+                    'upgrade' => true,
+                    'user_id' => $user->id,
+                    'plan_id' => $plan->id,
+                ],
+            ],
+            'success_url' => env('FRONTEND_URL') . '/dashboard/profile?subscribed=1',
+            'cancel_url'  => env('FRONTEND_URL') . '/dashboard/profile?cancel=1',
         ]);
+
+        return response()->json(['url' => $session->url]);
+
+    } catch (\Exception $e) {
+        \Log::error('Upgrade subscription failed: ' . $e->getMessage());
+        return response()->json(['error' => $e->getMessage()], 500);
     }
+}
 
     public function stripeWebhook(Request $request)
 {
@@ -242,6 +349,26 @@ class BillingController extends Controller
         return response('OK', 200);
     
 }
+        // Handle Upgrade to PRO (one-time charge)
+if (!empty($session->metadata->upgrade) && $session->metadata->plan_id) {
+
+    $plan = Plan::find($session->metadata->plan_id);
+
+    if ($plan && strtolower($plan->slug) === 'pro') {
+        $user->plan_id = $plan->id;
+        $user->subscription_status = 'active';
+        $user->current_period_end = now()->addYear();
+        $user->save();
+
+        \Log::info("User upgraded to PRO successfully", [
+            'user' => $user->email,
+            'plan' => 'pro'
+        ]);
+
+        return response('OK', 200);
+    }
+}
+
 
 
         try {
