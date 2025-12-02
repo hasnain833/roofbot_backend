@@ -105,7 +105,6 @@ public function convertToJob($id, Request $request)
         return response()->json(['error' => 'Access denied: Invalid tenant'], 403);
     }
 
-    // ✅ Fetch appointment by tenant_id AND id (any user of tenant)
     $appointment = Appointment::with('serviceType')
         ->where('id', $id)
         ->where('tenant_id', $tenant->id)
@@ -188,7 +187,7 @@ public function publicStore(Request $request)
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
             'notes' => 'nullable|string',
-            'serviceType' => 'nullable|string',
+            'service_type_id' => 'nullable|exists:service_types,id',
             'start_time' => 'required|date',
             'end_time' => 'required|date|after:start_time',
     ]);

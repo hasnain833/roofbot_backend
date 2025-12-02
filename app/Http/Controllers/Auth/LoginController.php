@@ -19,15 +19,27 @@ class LoginController extends AuthenticatedSessionController
         return $this->loginPipeline($request)->then(function ($request) {
             $user = Auth::user();
             $token = $user->createToken('auth_token', ['role:' . $user->role])->plainTextToken;
-
+            $lastPlanId = $user->plan_id;
             $isOwner = false;
 
-            if ($user->email === 'griffinb@invictusconnect.com') {
-            $isOwner = true;
-                }
-            elseif ($user->subscription_status === 'active' && $user->plan_id !== null) {
-            $isOwner = true;
-            }
+if ($user->email === 'griffinb@invictusconnect.com') {
+    $isOwner = true;
+}
+
+elseif ($user->plan_id !== null) {
+
+    $now = Carbon::now();
+    $currentEnd = $user->current_period_end ? Carbon::parse($user->current_period_end) : null;
+
+    if ($user->subscription_status === 'active') {
+        $isOwner = true;
+    }
+
+    elseif ($user->subscription_status === 'canceled' && $currentEnd && $currentEnd->greaterThanOrEqualTo($now)) {
+        $isOwner = true;
+    }
+}
+
 
         return response()->json([
                 'token' => $token,
@@ -45,6 +57,7 @@ class LoginController extends AuthenticatedSessionController
                     'stripe_customer_id' => $user->stripe_customer_id,
                     'has_valid_subscription' => $user->has_valid_subscription, 
                     'is_owner' => $isOwner,
+                    'last_plan_id' => $lastPlanId,
                 ],
             ]);
 

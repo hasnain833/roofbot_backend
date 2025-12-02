@@ -142,7 +142,7 @@ class BillingController extends Controller
             $description = '';
 
             if (strtolower($plan->slug) === 'starter') {
-                $amount = intval($plan->monthly_price * 100); // ✅ no setup fee
+                $amount = intval($plan->monthly_price * 100); 
                 $name = 'Starter Plan';
                 $description = 'Resubscribe to Starter Plan';
             } else {
