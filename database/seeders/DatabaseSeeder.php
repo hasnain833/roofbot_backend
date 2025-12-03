@@ -17,7 +17,7 @@ class DatabaseSeeder extends Seeder
             ServiceTypeSeeder::class,
         ]);
         // ──────────────────────────────────────────────────────────────
-        // 1. Create the **company owner** – full access, no Stripe
+        // 1. Create the **company owner** – full access
         // ──────────────────────────────────────────────────────────────
         $owner = User::factory()->create([
             'first_name'          => 'Griffin',
