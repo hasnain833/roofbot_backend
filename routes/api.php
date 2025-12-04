@@ -52,7 +52,8 @@ Route::post('/tenant/integration/disconnect', [AgentIntegrationController::class
 // Route::get('/chatbot/{botToken}', [ChatbotController::class, 'iframeChatbot']);
 
 Route::middleware('auth:sanctum')->group(function () {
-    Route::get('/profile/update', [UserController::class, 'updateProfile']);
+    // Route::get('/profile/update', [UserController::class, 'updateProfile']);
+    Route::put('/profile/update', [UserController::class, 'updateProfile']);
     Route::put('/profile/password/update', [UserController::class, 'updatePasswordProfile']);
 });
 
