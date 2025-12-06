@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Http;
 use App\Helper;
 use App\Models\Lead;
 use App\Models\Message; 
@@ -154,5 +155,49 @@ public function statusCallback(Request $request)
 
     return response()->json(['success' => true]);
 }
+public function summarizeChat(Request $request)
+{
+    $leadId = $request->input('lead_id');
+    $lead = Lead::find($leadId);
+    if (!$lead) return response()->json(['error' => 'Lead not found'], 404);
+
+    $messages = Message::where('lead_id', $leadId)
+        ->orderBy('created_at', 'asc')
+        ->get();
+
+    if ($messages->isEmpty()) {
+        return response()->json(['summary' => 'No messages to summarize.']);
+    }
+
+    // Format chat for summary
+    $chatText = '';
+    foreach ($messages as $msg) {
+        $sender = $msg->out ? 'Agent' : 'Lead';
+        $chatText .= "{$sender}: {$msg->text}\n";
+    }
+
+    try {
+        $prompt = "Summarize this SMS conversation between customer and company in 3-4 short sentences
+Highlight intent, questions, tone, and next steps. :\n\n{$chatText}";
+
+        $response = Http::withToken(env('OPENAI_API_KEY'))
+            ->post('https://api.openai.com/v1/chat/completions', [
+                'model' => 'gpt-3.5-turbo',
+                'messages' => [
+                    ['role' => 'system', 'content' => 'You are an assistant summarizing SMS conversations between an agent and a lead.'],
+                    ['role' => 'user', 'content' => $prompt],
+                ],
+                'max_tokens' => 150,
+            ]);
+
+        $summary = $response->json('choices.0.message.content') ?? 'No summary generated.';
+        $lead->update(['ai_chat_summary' => $summary]);
+
+        return response()->json(['summary' => $summary]);
+    } catch (\Exception $e) {
+        return response()->json(['error' => 'Failed to generate summary', 'message' => $e->getMessage()], 500);
+    }
+}
+
 
 }

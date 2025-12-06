@@ -110,8 +110,12 @@ $integration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->i
                 $client = new Client($integration->key, $integration->secret);
                 $numbers = $client->incomingPhoneNumbers->read();
                 $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
-                $serviceName = optional($lead->serviceType)->name ?? 'our service';
-                $body = "Hello {$lead->first_name}, thank you for showing interest in {$serviceName}. when would you like to book an appointment.!";
+                $template = \App\Models\TenantSmsTemplate::where('tenant_id', $tenant->id)->first();
+                $body = $template ? $template->message : "Hello {first_name}, thank you for showing interest in {service_type} services. when would you like to book an appointment with us?";
+
+                // Replace placeholders
+                $body = str_replace('{first_name}', $lead->first_name, $body);
+                $body = str_replace('{service_type}', optional($lead->serviceType)->name ?? ' services', $body);
 
                 $client->messages->create($lead->phone, [
                     'from' => $fromNumber,
@@ -120,9 +124,8 @@ $integration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->i
 
                 \App\Models\Message::create([
                     'lead_id' => $lead->id,
-                    'text' => "Hello {$lead->first_name}, thank you for showing interest in "
-                              . optional($lead->serviceType)->name ?? 'our service',
-                    'out' => true,
+                    'text' => $body,
+                     'out' => true,
                     'status' => 'sent',
                 ]);
 

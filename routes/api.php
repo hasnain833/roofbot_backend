@@ -15,6 +15,7 @@ use App\Http\Controllers\AppointmentController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\CrmJobController;
 use App\Http\Controllers\BillingController;
+use App\Http\Controllers\TenantSmsTemplateController;
 
 Route::post('/auth/login', [LoginController::class, 'store']);
 Route::post('/auth/signup', [RegisteredUserController::class, 'store']);
@@ -63,7 +64,14 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/leads', [LeadController::class, 'index']);
 
 });
- 
+
+ Route::middleware('auth:sanctum')->group(function() {
+    Route::get('/tenant/sms-template', [TenantSmsTemplateController::class, 'getTemplate']);
+    Route::post('/tenant/sms-template', [TenantSmsTemplateController::class, 'storeOrUpdate']);
+});
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/lead/summarize-chat', [TwilioController::class, 'summarizeChat']);
+});
 
 Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::post('/twilio/send-message', [TwilioController::class, 'sendMessage']);
