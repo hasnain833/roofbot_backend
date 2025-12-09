@@ -14,6 +14,7 @@ class Plan extends Model
         'setup_fee',
         'stripe_monthly_price_id',
         'stripe_yearly_price_id',
+        'stripe_setup_fee_price_id',
         'description', 
         'is_popular',
     ];
