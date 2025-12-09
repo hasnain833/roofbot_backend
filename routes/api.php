@@ -16,6 +16,9 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\CrmJobController;
 use App\Http\Controllers\BillingController;
 use App\Http\Controllers\TenantSmsTemplateController;
+use App\Http\Controllers\SettingsController;
+use App\AiAgents\leedAgent;
+use App\Helper;
 
 Route::post('/auth/login', [LoginController::class, 'store']);
 Route::post('/auth/signup', [RegisteredUserController::class, 'store']);
@@ -77,6 +80,11 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::post('/twilio/send-message', [TwilioController::class, 'sendMessage']);
     Route::get('/twilio/messages/{leadId}', [TwilioController::class, 'getMessages']);
 });
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/tenant/settings', [SettingsController::class, 'index']);
+    Route::put('/tenant/settings', [SettingsController::class, 'update']);
+    Route::delete('/tenant/settings', [SettingsController::class, 'delete']);
+});
 
 Route::post('/twilio/status', [TwilioController::class, 'statusCallback']);
 
@@ -118,6 +126,33 @@ Route::middleware('auth:sanctum')->group(function () {
         ]);
     });
 });
+ Route::post('/test-lead-agent', function (Request $request) {
+
+    $tenant = Helper::tenant();
+
+    if (!$tenant || !$tenant->openai_api_key) {
+        return response()->json([
+            'error' => 'Tenant API key missing'
+        ], 400);
+    }
+
+    $message = $request->input('message', 'Hello');
+
+    $sessionId = "test-session-" . $tenant->id;
+
+    $agent = new leedAgent($sessionId, $tenant->openai_api_key);
+
+    $response = $agent->handleMessage($message);
+
+    return response()->json([
+        'tenant_id'     => $tenant->id,
+        'using_api_key' => substr($tenant->openai_api_key, 0, 8) . '********',
+        'session_id'    => $sessionId,
+        'sent_message'  => $message,
+        'agent_reply'   => $response
+    ]);
+});
+
 
 Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/dashboard/stats', [DashboardController::class, 'stats']);

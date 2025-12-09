@@ -19,6 +19,7 @@ class CompanyController extends Controller
         'data' => [
             'company' => $tenant->company,
             'domain' => $tenant->domain,
+            'chatbot_prompt' => $tenant->chatbot_prompt, 
             'chatbot' => $chatbot ? [
                 'id' => $chatbot->id,
                 'name' => $chatbot->name,
@@ -36,6 +37,7 @@ class CompanyController extends Controller
     $request->validate([
         'company' => 'required|string|max:255',
         'domain' => 'required|string|max:255',
+         'chatbot_prompt' => 'nullable|string',
     ]);
 
     $existing = Tenant::where('domain', $request->domain)
@@ -51,6 +53,7 @@ class CompanyController extends Controller
     $tenant->update([
         'company' => $request->company,
         'domain' => $request->domain,
+        'chatbot_prompt' => $request->chatbot_prompt,
     ]);
 
     $chatbot = Chatbot::firstOrCreate(
@@ -72,6 +75,7 @@ class CompanyController extends Controller
     return response()->json([
         'message' => 'Company updated successfully',
         'tenant' => $tenant,
+        'chatbot_prompt' => $tenant->chatbot_prompt,
         'chatbot' => [
             'id' => $chatbot->id,
             'name' => $chatbot->name,

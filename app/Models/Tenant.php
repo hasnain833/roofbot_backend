@@ -13,6 +13,7 @@ class Tenant extends Model
         'company',
         'domain',
         'user_id',
+        'chatbot_prompt',
     ];
 
     public function owner()
