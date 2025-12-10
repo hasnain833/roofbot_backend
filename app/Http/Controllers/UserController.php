@@ -77,7 +77,7 @@ class UserController extends Controller
                 'plan_id' => $authUser->plan_id,
                 'subscription_status' => $authUser->subscription_status,
                 'current_period_end' => $authUser->current_period_end,
-                'stripe_customer_id' => null 
+                'stripe_id' => $authUser->stripe_id,
 ]);
 
         $tenant_id = null;

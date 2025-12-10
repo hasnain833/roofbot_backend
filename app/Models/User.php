@@ -41,19 +41,22 @@ class User extends Authenticatable
 
     protected $appends = ['has_valid_subscription'];
 
-    public function getHasValidSubscriptionAttribute()
-    {
-        if ($this->email === 'griffinb@invictusconnect.com') {
-            return true;
-        }
-        if (!$this->subscription_status || !$this->current_period_end) {
-            return false;
-        }
-
-        return $this->subscription_status === 'active'
-            && now()->lte($this->current_period_end);
-            
+   public function getHasValidSubscriptionAttribute()
+{
+    // Super admin bypass
+    if ($this->email === 'griffinb@invictusconnect.com') {
+        return true;
     }
+
+    $subscription = $this->subscription('default');
+
+    if (!$subscription) {
+        return false;
+    }
+
+    // This is the correct way: use Cashier's methods
+    return $subscription->active() || $subscription->onGracePeriod();
+}
 
        public function tenants()
 {

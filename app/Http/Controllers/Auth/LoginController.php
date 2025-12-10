@@ -31,13 +31,16 @@ elseif ($user->plan_id !== null) {
     $now = Carbon::now();
     $currentEnd = $user->current_period_end ? Carbon::parse($user->current_period_end) : null;
 
-    if ($user->subscription_status === 'active') {
-        $isOwner = true;
-    }
+ if ($user->subscription_status === 'active') {
+    $isOwner = true;
+}
+elseif ($user->subscription_status === 'trialing') {
+    $isOwner = true;
+}
+elseif ($user->subscription_status === 'canceled' && $currentEnd && $currentEnd->greaterThanOrEqualTo($now)) {
+    $isOwner = true;
+}
 
-    elseif ($user->subscription_status === 'canceled' && $currentEnd && $currentEnd->greaterThanOrEqualTo($now)) {
-        $isOwner = true;
-    }
 }
 
 
@@ -54,7 +57,7 @@ elseif ($user->plan_id !== null) {
                     'current_period_end' => $user->current_period_end
                         ? Carbon::parse($user->current_period_end)->toDateTimeString()
                         : null,
-                    'stripe_customer_id' => $user->stripe_customer_id,
+                    'stripe_id' => $user->stripe_id,
                     'has_valid_subscription' => $user->has_valid_subscription, 
                     'is_owner' => $isOwner,
                     'last_plan_id' => $lastPlanId,

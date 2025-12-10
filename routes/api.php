@@ -19,6 +19,9 @@ use App\Http\Controllers\TenantSmsTemplateController;
 use App\Http\Controllers\SettingsController;
 use App\AiAgents\leedAgent;
 use App\Helper;
+use App\Http\Controllers\StripeWebhookController;
+use Laravel\Cashier\Http\Controllers\WebhookController;
+
 
 Route::post('/auth/login', [LoginController::class, 'store']);
 Route::post('/auth/signup', [RegisteredUserController::class, 'store']);
@@ -177,11 +180,20 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/subscription', [BillingController::class, 'getSubscription']);
     Route::post('/subscription/checkout', [BillingController::class, 'checkout']);
     Route::post('/subscription/cancel', [BillingController::class, 'cancelSubscription']);
-    Route::post('/subscription/subscribe', [BillingController::class, 'subscribe']);
+    Route::post('/subscription/subscribe', [BillingController::class, 'createSubscription']);
     Route::post('/subscription/upgrade', [BillingController::class, 'upgradeSubscription']);
 });
-Route::post('/stripe/webhook', [BillingController::class, 'stripeWebhook']);
 
+Route::post('/stripe/webhook', [StripeWebhookController::class, 'handleWebhook'])->name('cashier.webhook');
+
+
+Route::post('/user/subscribe', function (Request $request) {
+    $request->user()->newSubscription('default', 'price_monthly')
+        ->trialDays(14)
+        ->create($request->paymentMethodId);
+
+    // ...
+});
 Route::middleware(['auth:sanctum', 'subscription'])->group(function () {
     // Leads
     Route::apiResource('leads', LeadController::class);
