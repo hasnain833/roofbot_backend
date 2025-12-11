@@ -56,6 +56,12 @@ class StripeWebhookController extends CashierWebhookController
 
         parent::handleCustomerSubscriptionUpdated($payload);
     }
+    public function handleCustomerSubscriptionDeleted(array $payload)
+{
+    Log::info("Subscription deleted event processed", $payload);
+    return parent::handleCustomerSubscriptionDeleted($payload);
+}
+
 
     private function syncUserData(array $payload)
     {

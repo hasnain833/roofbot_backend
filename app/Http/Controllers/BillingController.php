@@ -26,91 +26,92 @@ class BillingController extends Controller
     /**
      * Get user's current subscription info
      */
-   public function getSubscription(Request $request)
-{
-    $user = $request->user();
-    if (!$user) return response()->json(['message' => 'Unauthenticated'], 401);
+    public function getSubscription(Request $request)
+    {
+        $user = $request->user();
+        if (!$user)
+            return response()->json(['message' => 'Unauthenticated'], 401);
 
-    $subscription = $user->subscription('default');
-    if (!$subscription) return response()->json(['data' => null]);
+        $subscription = $user->subscription('default');
+        if (!$subscription)
+            return response()->json(['data' => null]);
 
-    $stripeSub = $subscription->asStripeSubscription();
+        $stripeSub = $subscription->asStripeSubscription();
 
-    return response()->json([
-        'data' => [
-            'plan_id' => $user->plan_id,
-            'plan_name' => $user->plan?->name,
-            'stripe_status' => $subscription->stripe_status,
-            'is_active' => $subscription->stripe_status === 'active',
-            'real_status' => $subscription->stripe_status,
-            'is_canceled' => $subscription->canceled(),
-            'is_on_grace_period' => $subscription->onGracePeriod(),
-            'current_period_end' => $stripeSub->current_period_end
-                ? Carbon::createFromTimestamp($stripeSub->current_period_end)->format('Y-m-d H:i:s')
-                : null,
-            'trial_ends_at' => $subscription->trial_ends_at
-                ? Carbon::parse($subscription->trial_ends_at)->format('Y-m-d H:i:s')
-                : null,
-            'is_on_trial' => $subscription->onTrial(),
-        ],
-    ]);
-}
+        return response()->json([
+            'data' => [
+                'plan_id' => $user->plan_id,
+                'plan_name' => $user->plan?->name,
+                'stripe_status' => $subscription->stripe_status,
+                'is_active' => $subscription->stripe_status === 'active',
+                'real_status' => $subscription->stripe_status,
+                'is_canceled' => $subscription->canceled(),
+                'is_on_grace_period' => $subscription->onGracePeriod(),
+                'current_period_end' => $stripeSub->current_period_end
+                    ? Carbon::createFromTimestamp($stripeSub->current_period_end)->format('Y-m-d H:i:s')
+                    : null,
+                'trial_ends_at' => $subscription->trial_ends_at
+                    ? Carbon::parse($subscription->trial_ends_at)->format('Y-m-d H:i:s')
+                    : null,
+                'is_on_trial' => $subscription->onTrial(),
+            ],
+        ]);
+    }
 
 
     /**
      * Create Stripe Checkout Session using Cashier
      */
-public function checkout(Request $request)
-{
-    $request->validate(['plan_id' => 'required|exists:plans,id']);
+    public function checkout(Request $request)
+    {
+        $request->validate(['plan_id' => 'required|exists:plans,id']);
 
-    $plan = Plan::findOrFail($request->plan_id);
-    $user = $request->user();
+        $plan = Plan::findOrFail($request->plan_id);
+        $user = $request->user();
 
-    if (!$user) {
-        return response()->json(['message' => 'Unauthenticated'], 401);
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
+
+        try {
+            $isMonthly = !empty($plan->stripe_monthly_price_id);
+            $priceId = $isMonthly ? $plan->stripe_monthly_price_id : $plan->stripe_yearly_price_id;
+
+            $trialDays = 14;
+
+            $lineItems = [
+                [
+                    'price' => $priceId,
+                    'quantity' => 1,
+                ]
+            ];
+
+
+
+
+            // Create checkout session (no setup fee here)
+            $checkout = $user->checkout($lineItems, [
+                'success_url' => env('FRONTEND_URL') . '/signin?paid=1',
+                'cancel_url' => env('FRONTEND_URL') . '/signup?cancel=1',
+                'mode' => 'subscription',
+                'subscription_data' => [
+                    'trial_period_days' => $trialDays,
+                ],
+                'metadata' => [
+                    'plan_id' => $plan->id,
+                    'user_id' => $user->id,
+                    'should_add_setup_fee' =>
+                        ($plan->slug === 'starter' && $isMonthly) ? 'yes' : 'no'
+                ],
+            ]);
+
+            return response()->json(['url' => $checkout->url]);
+
+        } catch (\Exception $e) {
+            \Log::error('Checkout creation failed: ' . $e->getMessage());
+            return response()->json(['message' => 'Failed to create checkout session'], 500);
+        }
     }
-
-    try {
-        $isMonthly = !empty($plan->stripe_monthly_price_id);
-        $priceId = $isMonthly ? $plan->stripe_monthly_price_id : $plan->stripe_yearly_price_id;
-
-        $trialDays = 14;
-
-        // Stripe Checkout accepts only this structure:
-       $lineItems = [
-    [
-        'price' => $priceId,
-        'quantity' => 1,
-    ]
-];
-
-
-
-
-        // Create checkout session (no setup fee here)
-        $checkout = $user->checkout($lineItems, [
-            'success_url' => env('FRONTEND_URL') . '/signin?paid=1',
-            'cancel_url' => env('FRONTEND_URL') . '/signup?cancel=1',
-            'mode' => 'subscription',
-            'subscription_data' => [
-                'trial_period_days' => $trialDays,
-            ],
-            'metadata' => [
-                'plan_id' => $plan->id,
-                'user_id' => $user->id,
-                'should_add_setup_fee' => 
-                    ($plan->slug === 'starter' && $isMonthly) ? 'yes' : 'no'
-            ],
-        ]);
-
-        return response()->json(['url' => $checkout->url]);
-
-    } catch (\Exception $e) {
-        \Log::error('Checkout creation failed: '.$e->getMessage());
-        return response()->json(['message' => 'Failed to create checkout session'], 500);
-    }
-}
 
 
 
@@ -118,57 +119,54 @@ public function checkout(Request $request)
      * New subscription for user (if not using checkout)
      * This creates subscription via Cashier's newSubscription method
      */
-  public function createSubscription(Request $request)
-{
-    $request->validate(['plan_id' => 'required|exists:plans,id']);
+    public function createSubscription(Request $request)
+    {
+        $request->validate(['plan_id' => 'required|exists:plans,id']);
 
-    $plan = Plan::findOrFail($request->plan_id);
-    $user = $request->user();
+        $plan = Plan::findOrFail($request->plan_id);
+        $user = $request->user();
 
-    if (!$user) {
-        return response()->json(['message' => 'Unauthenticated'], 401);
-    }
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
 
-    try {
-        $priceId = $plan->stripe_yearly_price_id ?? $plan->stripe_monthly_price_id;
+        try {
+            $priceId = $plan->stripe_yearly_price_id ?? $plan->stripe_monthly_price_id;
 
-        // Set trialDays or trialUntil here
-        $trialDays = 10; // Example: 10-day trial
 
-        $subscription = $user->newSubscription('default', $priceId)
-            ->trialDays($trialDays) // ✅ trial implemented
-            ->create();
+            $subscription = $user->newSubscription('default', $priceId)
+                ->create();
 
-        // Update user's plan info
-        $user->plan_id = $plan->id;
-        $user->current_period_end = $subscription->asStripeSubscription()->current_period_end
-            ? Carbon::createFromTimestamp($subscription->asStripeSubscription()->current_period_end)
-            : null;
-        $user->subscription_status = $subscription->stripe_status;
-        $user->save();
+            // Update user's plan info
+            $user->plan_id = $plan->id;
+            $user->current_period_end = $subscription->asStripeSubscription()->current_period_end
+                ? Carbon::createFromTimestamp($subscription->asStripeSubscription()->current_period_end)
+                : null;
+            $user->subscription_status = $subscription->stripe_status;
+            $user->save();
 
-        Log::info('Subscription created with trial via Cashier', [
-            'user_id' => $user->id,
-            'plan_id' => $plan->id,
-            'stripe_id' => $subscription->stripe_id,
-            'trial_ends_at' => $subscription->trial_ends_at,
-        ]);
-
-        return response()->json([
-            'message' => 'Subscription created successfully with trial',
-            'subscription' => [
-                'id' => $subscription->stripe_id,
-                'status' => $subscription->stripe_status,
+            Log::info('Subscription created with trial via Cashier', [
+                'user_id' => $user->id,
+                'plan_id' => $plan->id,
+                'stripe_id' => $subscription->stripe_id,
                 'trial_ends_at' => $subscription->trial_ends_at,
-                'plan' => $plan->name,
-            ],
-        ]);
+            ]);
 
-    } catch (\Exception $e) {
-        Log::error('Subscription creation failed: ' . $e->getMessage());
-        return response()->json(['message' => 'Failed to create subscription'], 500);
+            return response()->json([
+                'message' => 'Subscription created successfully with trial',
+                'subscription' => [
+                    'id' => $subscription->stripe_id,
+                    'status' => $subscription->stripe_status,
+                    'trial_ends_at' => $subscription->trial_ends_at,
+                    'plan' => $plan->name,
+                ],
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Subscription creation failed: ' . $e->getMessage());
+            return response()->json(['message' => 'Failed to create subscription'], 500);
+        }
     }
-}
 
 
     /**
@@ -187,7 +185,7 @@ public function checkout(Request $request)
             }
 
             // Cancel at end of period (graceful cancellation)
-            $subscription->cancelAtPeriodEnd();
+            $subscription->cancel();
 
             return response()->json([
                 'message' => 'Subscription will be canceled at period end',
@@ -384,7 +382,7 @@ public function checkout(Request $request)
     private function onCheckoutSessionCompleted($payload)
     {
         $session = $payload['data']['object'];
-        
+
         Log::info('Checkout session completed', [
             'session_id' => $session['id'],
             'customer_email' => $session['customer_details']['email'] ?? null,
@@ -400,7 +398,7 @@ public function checkout(Request $request)
     private function onSubscriptionUpdated($payload)
     {
         $sub = $payload['data']['object'];
-        
+
         Log::info('Subscription updated', [
             'stripe_id' => $sub['id'],
             'status' => $sub['status'],
@@ -427,7 +425,7 @@ public function checkout(Request $request)
     private function onSubscriptionDeleted($payload)
     {
         $sub = $payload['data']['object'];
-        
+
         Log::info('Subscription deleted', [
             'stripe_id' => $sub['id'],
         ]);
