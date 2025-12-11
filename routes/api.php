@@ -115,6 +115,7 @@ Route::middleware(['auth:sanctum','admin'])->group(function () {
 
 Route::middleware(['auth:sanctum'])->group(function () {
   Route::get('/chatbot/session-info', [ChatbotController::class, 'sessionInfo']);
+ Route::post('/chatbot/message', [ChatbotController::class, 'handleMessage']);
 });
 Route::get('/chatbot/session-info-iframe', [ChatbotController::class, 'sessionInfoIframe']);
 

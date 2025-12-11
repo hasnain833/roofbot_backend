@@ -35,4 +35,8 @@ class Tenant extends Model
     {
         return $this->hasMany(TenantAgent::class);
     }
+    public function chatbot()
+{
+    return $this->hasOne(Chatbot::class);
+}
 }
