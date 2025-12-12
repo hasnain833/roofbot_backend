@@ -3,6 +3,8 @@
 namespace App\Jobs;
 
 use App\Models\Appointment;
+use App\Models\TenantAgent;
+use App\Models\TenantAgentIntegration;
 use Google\Client;
 use Google\Service\Calendar;
 use Illuminate\Bus\Queueable;
@@ -25,48 +27,64 @@ class DeleteGoogleEvent implements ShouldQueue
     public function handle(): void
     {
         $appointment = $this->appointment;
-        $tenant = $appointment->tenant;
-
-        if (!$tenant) {
-            \Log::warning('Cannot delete Google event: Tenant missing');
-            return;
-        }
+        $tenantId = $appointment->tenant_id;
 
         if (!$appointment->google_event_id) {
-            \Log::warning('Cannot delete Google event: Appointment missing google_event_id', [
+            \Log::info('No Google event to delete (missing google_event_id)', [
                 'appointment_id' => $appointment->id,
             ]);
             return;
         }
 
-        if (!$tenant->google_access_token) {
-            \Log::warning('Cannot delete Google event: Tenant missing google_access_token', [
-                'tenant_id' => $tenant->id,
+        // Get TenantAgent
+        $tenantAgent = TenantAgent::where('tenant_id', $tenantId)->first();
+        if (!$tenantAgent) {
+            \Log::warning('DeleteGoogleEvent: TenantAgent missing for tenant ID: ' . $tenantId);
+            return;
+        }
+
+        // Get Google integration
+        $integration = TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
+            ->where('provider', 'google')
+            ->first();
+
+        if (!$integration || !$integration->key) {
+            \Log::warning('DeleteGoogleEvent: Google access token missing', [
+                'tenant_agent_id' => $tenantAgent->id,
             ]);
             return;
         }
 
         try {
             $client = new Client();
-            $client->setAccessToken($tenant->google_access_token);
+            $client->setAccessToken($integration->key);
 
-            // Optional refresh token logic
-            if ($client->isAccessTokenExpired() && $tenant->google_refresh_token) {
-                $client->fetchAccessTokenWithRefreshToken($tenant->google_refresh_token);
-                $tenant->update(['google_access_token' => $client->getAccessToken()]);
+            // Refresh if expired
+            if ($client->isAccessTokenExpired() && $integration->secret) {
+                $client->fetchAccessTokenWithRefreshToken($integration->secret);
+                $newToken = $client->getAccessToken();
+
+                $integration->update([
+                    'key' => $newToken['access_token'] ?? $newToken,
+                ]);
             }
 
             $service = new Calendar($client);
             $service->events->delete('primary', $appointment->google_event_id);
 
-            \Log::info("Google event deleted successfully", [
+            \Log::info('Google Calendar event deleted successfully', [
                 'appointment_id' => $appointment->id,
                 'google_event_id' => $appointment->google_event_id,
             ]);
+
+            // Optional: Clear the ID after deletion
+            $appointment->update(['google_event_id' => null]);
+
         } catch (\Exception $e) {
-            \Log::error('Failed to delete Google event: ' . $e->getMessage(), [
+            \Log::error('Failed to delete Google Calendar event', [
                 'appointment_id' => $appointment->id,
                 'google_event_id' => $appointment->google_event_id,
+                'error' => $e->getMessage(),
             ]);
         }
     }

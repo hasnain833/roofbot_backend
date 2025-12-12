@@ -23,6 +23,11 @@ return [
         'App\\AiAgents\\',
         'App\\Agents\\',
     ],
+    'history' => [
+    'enabled' => true,
+    'driver' => 'database',
+],
+
 
     /**
      * Always keep provider named 'default'

@@ -49,9 +49,14 @@ class AppointmentController extends Controller
             $lead = $appointment->lead;
             $serviceType = optional($appointment->serviceType)->name;
 
-            $googleToken = TenantAgentIntegration::where('tenant_agent_id', $appointment->user_id)
-                ->where('provider', 'google')
-                ->value('key');
+            $tenantAgent = \App\Models\TenantAgent::where('tenant_id', $appointment->tenant_id)->first();
+        if (!$tenantAgent) {
+            throw new \Exception('TenantAgent not found for tenant ID: ' . $appointment->tenant_id);
+        }
+
+        $googleIntegration = TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
+            ->where('provider', 'google')
+            ->first();
 
              $twilioIntegration = TenantAgentIntegration::where('tenant_agent_id', $appointment->user_id)
             ->where('provider', 'twilio')
@@ -67,7 +72,7 @@ class AppointmentController extends Controller
                 'windowEndISO' => Carbon::parse($appointment->end_time)->toIso8601String(),
                 'tenant_id' => $appointment->tenant_id,
                 'appointment_id' => $appointment->id,
-                'google_access_token' => $googleToken,
+                'google_access_token' => $googleIntegration?->key,
                 'twilio_sid' => $twilioIntegration?->key,
                 'twilio_token' => $twilioIntegration?->secret, 
             ];
@@ -81,8 +86,13 @@ class AppointmentController extends Controller
         }
 
         // ✅ Google Calendar Sync Job
-        try {
+        try {\Log::info('Dispatching SyncAppointmentToGoogle job', [
+        'appointment_id' => $appointment->id,
+        'tenant_id' => $appointment->tenant_id,
+    ]);
             dispatch(new SyncAppointmentToGoogle($appointment));
+            \Log::info('SyncAppointmentToGoogle job dispatched successfully', [
+        'appointment_id' => $appointment->id,]);
         } catch (\Exception $e) {
             \Log::error('❌ Failed Google Sync Job: ' . $e->getMessage());
         }
@@ -195,42 +205,46 @@ public function publicStore(Request $request)
     $validated['user_id'] = null; 
 
     $appointment = Appointment::create($validated);
+// In publicStore, replace the try block for payload with:
+try {
+    $lead = $appointment->lead;
+    $serviceType = optional($appointment->serviceType)->name;
 
-       try {
-            $lead = $appointment->lead;
-            $serviceType = optional($appointment->serviceType)->name;
+    $tenantAgent = \App\Models\TenantAgent::where('tenant_id', $appointment->tenant_id)->first();
+    if (!$tenantAgent) {
+        throw new \Exception('TenantAgent not found for tenant ID: ' . $appointment->tenant_id);
+    }
 
-            $googleToken = TenantAgentIntegration::where('tenant_agent_id', $appointment->user_id)
-                ->where('provider', 'google')
-                ->value('key');
+    $googleIntegration = TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
+        ->where('provider', 'google')
+        ->first();
 
-             $twilioIntegration = TenantAgentIntegration::where('tenant_agent_id', $appointment->user_id)
-            ->where('provider', 'twilio')
-            ->first();
+    $twilioIntegration = TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
+        ->where('provider', 'twilio')
+        ->first();
 
-            $payload = [
-                'event' => 'appointment_created',
-                'fullName' => $lead ? trim($lead->first_name . ' ' . ($lead->last_name ?? '')) : null,
-                'userPhone' => $lead->phone ?? null,
-                'email' => $lead->email ?? null,
-                'serviceNeeded' => $serviceType ?? 'General Service',
-                'preferredDateTimeISO' => Carbon::parse($appointment->start_time)->toIso8601String(),
-                'windowEndISO' => Carbon::parse($appointment->end_time)->toIso8601String(),
-                'tenant_id' => $appointment->tenant_id,
-                'appointment_id' => $appointment->id,
-                'google_access_token' => $googleToken,
-                'twilio_sid' => $twilioIntegration?->key,
-                'twilio_token' => $twilioIntegration?->secret, 
-            ];
+    $payload = [
+        'event' => 'appointment_created',
+        'fullName' => $lead ? trim($lead->first_name . ' ' . ($lead->last_name ?? '')) : null,
+        'userPhone' => $lead->phone ?? null,
+        'email' => $lead->email ?? null,
+        'serviceNeeded' => $serviceType ?? 'General Service',
+        'preferredDateTimeISO' => Carbon::parse($appointment->start_time)->toIso8601String(),
+        'windowEndISO' => Carbon::parse($appointment->end_time)->toIso8601String(),
+        'tenant_id' => $appointment->tenant_id,
+        'appointment_id' => $appointment->id,
+        'google_access_token' => $googleIntegration?->key,
+        'twilio_sid' => $twilioIntegration?->key,
+        'twilio_token' => $twilioIntegration?->secret, 
+    ];
 
-            Http::withHeaders([
-                'Accept' => 'application/json',
-            ])->post(env('N8N_WEBHOOK_URL'), $payload);
+    Http::withHeaders([
+        'Accept' => 'application/json',
+    ])->post(env('N8N_WEBHOOK_URL'), $payload);
 
-        } catch (\Exception $e) {
-            \Log::error('❌ Failed n8n webhook: ' . $e->getMessage());
-        }
-
+} catch (\Exception $e) {
+    \Log::error('❌ Failed n8n webhook: ' . $e->getMessage());
+}
     try {
         dispatch(new SyncAppointmentToGoogle($appointment));
     } catch (\Exception $e) {

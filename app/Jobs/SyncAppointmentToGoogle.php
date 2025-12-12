@@ -3,6 +3,8 @@
 namespace App\Jobs;
 
 use App\Models\Appointment;
+use App\Models\TenantAgent;
+use App\Models\TenantAgentIntegration;
 use Google\Client;
 use Google\Service\Calendar;
 use Illuminate\Bus\Queueable;
@@ -27,21 +29,42 @@ class SyncAppointmentToGoogle implements ShouldQueue
     public function handle(): void
     {
         $appointment = $this->appointment;
-        $tenant = $appointment->tenant;
+        $tenantId = $appointment->tenant_id;
 
-        if (!$tenant || !$tenant->google_access_token) {
-            \Log::warning('Google token missing for tenant ID: ' . $tenant->id ?? 'unknown');
+        // Get TenantAgent for this tenant
+        $tenantAgent = TenantAgent::where('tenant_id', $tenantId)->first();
+        if (!$tenantAgent) {
+            \Log::warning('TenantAgent missing for tenant ID: ' . $tenantId);
+            return;
+        }
+
+        // Get Google integration
+        $integration = TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
+            ->where('provider', 'google')
+            ->first();
+
+        if (!$integration || !$integration->key) {
+            \Log::warning('Google integration or access token missing for tenant agent ID: ' . $tenantAgent->id);
             return;
         }
 
         try {
             $client = new Client();
-            $client->setAccessToken($tenant->google_access_token);
+            $client->setAccessToken($integration->key);
 
-            // ✅ Refresh token if expired
-            if ($client->isAccessTokenExpired() && $tenant->google_refresh_token) {
-                $client->fetchAccessTokenWithRefreshToken($tenant->google_refresh_token);
-                $tenant->update(['google_access_token' => $client->getAccessToken()]);
+            // Refresh token if expired
+            if ($client->isAccessTokenExpired() && $integration->secret) {
+                $client->fetchAccessTokenWithRefreshToken($integration->secret);
+                $newAccessToken = $client->getAccessToken();
+
+                // Update integration with new access token
+                $integration->update([
+                    'key' => $newAccessToken['access_token'],
+                    'meta' => json_encode([
+                        'expires_in' => $newAccessToken['expires_in'] ?? null,
+                        'updated_at' => now()->toDateTimeString(),
+                    ]),
+                ]);
             }
 
             $service = new Calendar($client);
@@ -49,8 +72,8 @@ class SyncAppointmentToGoogle implements ShouldQueue
             $eventData = [
                 'summary' => $appointment->title,
                 'description' => $appointment->description ?? '',
-                'start' => ['dateTime' => $appointment->start_time->toRfc3339String(), 'timeZone' => 'UTC'],
-                'end' => ['dateTime' => $appointment->end_time->toRfc3339String(), 'timeZone' => 'UTC'],
+                'start' => ['dateTime' => $appointment->start_time->toRfc3339String(), 'timeZone' => 'Asia/Karachi'],
+                'end' => ['dateTime' => $appointment->end_time->toRfc3339String(), 'timeZone' => 'Asia/Karachi'],
             ];
 
             if ($this->isUpdate && $appointment->google_event_id) {
@@ -60,8 +83,10 @@ class SyncAppointmentToGoogle implements ShouldQueue
                 $appointment->update(['google_event_id' => $event->id]);
             }
 
+            \Log::info('Google Calendar sync successful for appointment ID: ' . $appointment->id);
+
         } catch (\Exception $e) {
-            \Log::error('Google Calendar Sync Failed: ' . $e->getMessage());
+            \Log::error('Google Calendar Sync Failed for appointment ID: ' . $appointment->id . ' - ' . $e->getMessage());
         }
     }
 }

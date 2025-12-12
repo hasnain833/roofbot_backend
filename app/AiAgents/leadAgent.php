@@ -6,124 +6,52 @@ use LarAgent\Agent;
 use LarAgent\Attributes\Tool;
 use App\Models\Lead;
 use App\Models\Appointment;
+use App\Jobs\SyncAppointmentToGoogle;
 use Illuminate\Support\Facades\Log;
+
 
 class LeadAgent extends Agent
 {
     protected $model = 'gpt-4o-mini';
-    protected $history = 'session'; // LarAgent handles chat history automatically
+    protected $history = 'cache'; 
     protected $provider = 'default';
     protected $temperature = 0.7;
-    protected $contextWindowSize = 8000; // Manage context window
-
+    protected $contextWindowSize = 8000; 
+    protected $storeMeta = true;
+    protected static $currentTenantId;
     public $tenantId;
     public $apiKey;
 
-    public function __construct($sessionId)
-    {
-        parent::__construct($sessionId);
+     public function __construct(?string $sessionId = null)
+{
+    parent::__construct(env('OPENAI_API_KEY', 'temporary-placeholder-key'));
+
+    if ($sessionId) {
+        $this->customSessionId = $sessionId;
     }
+    if (static::$currentTenantId !== null) {
+            $this->tenantId = static::$currentTenantId;
+        }
+}
+
 
     public function setTenantContext(string $apiKey, int $tenantId): self
     {
         $this->apiKey = $apiKey;
-        $this->tenantId = $tenantId;
+      $this->tenantId = $tenantId;
+
+        static::$currentTenantId = $tenantId;
         config(['laragent.providers.default.api_key' => $apiKey]);
+
         return $this;
     }
-
-    /**
-     * Get summary of what's been discussed by analyzing chat history
-     */
-    protected function getConversationSummary(): string
-    {
-        $history = $this->chatHistory()->getMessages();
-        
-        $summary = "=== CONVERSATION HISTORY SUMMARY ===\n";
-        
-        if (count($history) === 0) {
-            $summary .= "No information collected yet.\n\n";
-            return $summary;
-        }
-
-        // Extract collected data from conversation history
-        $collected = [
-            'first_name' => null,
-            'last_name' => null,
-            'phone' => null,
-            'email' => null,
-            'service_type' => null,
-            'address' => null,
-            'city' => null,
-            'state' => null,
-            'zip' => null,
-            'country' => null,
-        ];
-
-        // Look through recent messages for data
-        foreach ($history as $msg) {
-            $content = strtolower($msg->getContent());
-            
-            // Check for name patterns
-            if (strpos($content, 'name') !== false && $collected['first_name'] === null) {
-                preg_match('/(?:name(?:\s+is)?|i\'?m|my\s+name\s+is)\s+([a-z]+)\s+([a-z]+)?/i', $msg->getContent(), $matches);
-                if (!empty($matches[1])) {
-                    $collected['first_name'] = $matches[1];
-                    $collected['last_name'] = $matches[2] ?? '';
-                }
-            }
-            
-            // Check for phone
-            if (preg_match('/(\+?\d{1,3}[-.\s]?)?\d{3,4}[-.\s]?\d{3,4}[-.\s]?\d{4}|\+\d{10,}/', $msg->getContent(), $matches) && $collected['phone'] === null) {
-                $collected['phone'] = $matches[0];
-            }
-            
-            // Check for email
-            if (preg_match('/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/', $msg->getContent(), $matches) && $collected['email'] === null) {
-                $collected['email'] = $matches[0];
-            }
-            
-            // Check for service type
-            if ($collected['service_type'] === null) {
-                if (preg_match('/(roof\s+inspection|roof|gutter|repair|siding|window|cleaning)/i', $msg->getContent(), $matches)) {
-                    $collected['service_type'] = trim($matches[1]);
-                }
-            }
-        }
-
-        // Display what's been collected
-        if ($collected['first_name']) {
-            $summary .= "✓ Name: " . $collected['first_name'];
-            if ($collected['last_name']) {
-                $summary .= " " . $collected['last_name'];
-            }
-            $summary .= "\n";
-        }
-        
-        if ($collected['phone']) {
-            $summary .= "✓ Phone: " . $collected['phone'] . "\n";
-        }
-        
-        if ($collected['email']) {
-            $summary .= "✓ Email: " . $collected['email'] . "\n";
-        }
-        
-        if ($collected['service_type']) {
-            $summary .= "✓ Service: " . $collected['service_type'] . "\n";
-        }
-
-        $summary .= "\n";
-        return $summary;
-    }
-
     public function instructions(): string
     {
-        return $this->getConversationSummary() . "
+        return 
 
-You are a friendly roofing intake assistant. Your job is to collect customer information for booking appointments.
+"You are a friendly roofing intake assistant. Your job is to collect customer information for booking appointments.
 
-IMPORTANT: The chat history above contains the full conversation. 
-- Review what's been discussed to avoid repeating questions.
+IMPORTANT: 
 - NEVER ask for information the user has already provided.
 - Only ask for the next missing piece of information.
 
@@ -299,7 +227,7 @@ CONVERSATION RULES:
                 return "Error: Missing required appointment information.";
             }
 
-            Appointment::create([
+            $appointment = Appointment::create([
                 'tenant_id' => $this->tenantId,
                 'lead_id' => $lead_id,
                 'title' => $title,
@@ -309,8 +237,14 @@ CONVERSATION RULES:
                 'start_time' => $start_time,
                 'end_time' => $end_time,
             ]);
+            try {
+            dispatch(new SyncAppointmentToGoogle($appointment));
 
-            Log::info('Appointment booked', [
+        } catch (\Exception $e) {
+           
+        }
+
+            Log::info('Appointment booked via chatbot', [
                 'lead_id' => $lead_id,
                 'tenant_id' => $this->tenantId,
                 'start_time' => $start_time
