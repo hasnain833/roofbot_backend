@@ -50,22 +50,36 @@ class SyncAppointmentToGoogle implements ShouldQueue
 
         try {
             $client = new Client();
-            $client->setAccessToken($integration->key);
+            $client->setClientId(env('GOOGLE_CLIENT_ID'));
+            $client->setClientSecret(env('GOOGLE_CLIENT_SECRET'));
+            $client->setAccessType('offline');
+            $client->setAccessToken([
+                'access_token' => $integration->key,
+            'expires_in'   => $meta['expires_in'] ?? 3600,
+            'created'      => $meta['created'] ?? time(),
+ ]);
+
 
             // Refresh token if expired
-            if ($client->isAccessTokenExpired() && $integration->secret) {
-                $client->fetchAccessTokenWithRefreshToken($integration->secret);
-                $newAccessToken = $client->getAccessToken();
+          if ($client->isAccessTokenExpired() && $integration->secret) {
+    $newToken = $client->fetchAccessTokenWithRefreshToken($integration->secret);
 
-                // Update integration with new access token
-                $integration->update([
-                    'key' => $newAccessToken['access_token'],
-                    'meta' => json_encode([
-                        'expires_in' => $newAccessToken['expires_in'] ?? null,
-                        'updated_at' => now()->toDateTimeString(),
-                    ]),
-                ]);
-            }
+    if (!isset($newToken['access_token'])) {
+        throw new \Exception('Failed to refresh Google access token');
+    }
+
+$meta = json_decode($integration->meta ?? '{}', true);
+
+$integration->update([
+    'key' => $newToken['access_token'],
+    'meta' => json_encode(array_merge($meta, [
+        'expires_in' => $newToken['expires_in'] ?? 3600,
+        'created' => time(),
+    ])),
+]);
+
+}
+
 
             $service = new Calendar($client);
 

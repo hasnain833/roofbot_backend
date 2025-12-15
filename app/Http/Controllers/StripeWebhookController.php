@@ -29,7 +29,6 @@ class StripeWebhookController extends CashierWebhookController
 
         $object = $payload['data']['object'];
 
-        // ⬇ Your setup-fee logic left untouched
         if (
             $object['status'] === 'active' &&
             !empty($object['trial_end']) &&
@@ -83,7 +82,6 @@ class StripeWebhookController extends CashierWebhookController
 
             $stripeSub = $user->stripe()->subscriptions->retrieve($subscriptionId);
 
-            // ⬇ NEW TRIAL LOGIC ADDED
             $trialEndsAt = $stripeSub->trial_end
                 ? Carbon::createFromTimestamp($stripeSub->trial_end)
                 : null;
@@ -94,7 +92,7 @@ class StripeWebhookController extends CashierWebhookController
                 'stripe_status' => $stripeSub->status,
                 'stripe_price' => $stripeSub->items->data[0]->price->id ?? null,
                 'quantity' => $stripeSub->items->data[0]->quantity ?? 1,
-                'trial_ends_at' => $trialEndsAt,   // ⬅ NEW
+                'trial_ends_at' => $trialEndsAt,  
                 'ends_at' => $stripeSub->current_period_end
                     ? Carbon::createFromTimestamp($stripeSub->current_period_end)
                     : null,

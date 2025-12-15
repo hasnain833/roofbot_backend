@@ -155,11 +155,40 @@ public function statusCallback(Request $request)
 
     return response()->json(['success' => true]);
 }
+private function getTenantOpenAiKey()
+{
+    $tenant = Helper::tenant();
+    if (!$tenant) {
+        return null;
+    }
+
+    $tenantAgent = TenantAgent::where('tenant_id', $tenant->id)->first();
+    if (!$tenantAgent) {
+        return null;
+    }
+
+    $integration = TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
+        ->where('provider', 'openai')
+        ->first();
+
+    return $integration?->key
+        ?? $tenant->openai_api_key
+        ?? null;
+}
 public function summarizeChat(Request $request)
 {
     $leadId = $request->input('lead_id');
     $lead = Lead::find($leadId);
-    if (!$lead) return response()->json(['error' => 'Lead not found'], 404);
+    if (!$lead) {
+        return response()->json(['error' => 'Lead not found'], 404);
+    }
+
+    $apiKey = $this->getTenantOpenAiKey();
+    if (!$apiKey || !str_starts_with($apiKey, 'sk-')) {
+        return response()->json([
+            'error' => 'OpenAI API key not configured for this tenant'
+        ], 400);
+    }
 
     $messages = Message::where('lead_id', $leadId)
         ->orderBy('created_at', 'asc')
@@ -169,7 +198,6 @@ public function summarizeChat(Request $request)
         return response()->json(['summary' => 'No messages to summarize.']);
     }
 
-    // Format chat for summary
     $chatText = '';
     foreach ($messages as $msg) {
         $sender = $msg->out ? 'Agent' : 'Lead';
@@ -177,14 +205,14 @@ public function summarizeChat(Request $request)
     }
 
     try {
-        $prompt = "Summarize this SMS conversation between customer and company in 3-4 short sentences
-Highlight intent, questions, tone, and next steps. :\n\n{$chatText}";
+        $prompt = "Summarize this SMS conversation between customer and company in 3-4 short sentences.
+Highlight intent, questions, tone, and next steps:\n\n{$chatText}";
 
-        $response = Http::withToken(env('OPENAI_API_KEY'))
+        $response = Http::withToken($apiKey)
             ->post('https://api.openai.com/v1/chat/completions', [
                 'model' => 'gpt-3.5-turbo',
                 'messages' => [
-                    ['role' => 'system', 'content' => 'You are an assistant summarizing SMS conversations between an agent and a lead.'],
+                    ['role' => 'system', 'content' => 'You summarize SMS conversations.'],
                     ['role' => 'user', 'content' => $prompt],
                 ],
                 'max_tokens' => 150,
@@ -195,9 +223,13 @@ Highlight intent, questions, tone, and next steps. :\n\n{$chatText}";
 
         return response()->json(['summary' => $summary]);
     } catch (\Exception $e) {
-        return response()->json(['error' => 'Failed to generate summary', 'message' => $e->getMessage()], 500);
+        return response()->json([
+            'error' => 'Failed to generate summary',
+            'message' => $e->getMessage()
+        ], 500);
     }
 }
+
 
 
 }

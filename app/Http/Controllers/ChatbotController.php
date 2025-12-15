@@ -23,7 +23,6 @@ public function handleMessage(Request $request)
         'message' => 'required|string',
     ]);
 
-    // For authenticated users: Use Helper to get current tenant
     $tenant = Helper::tenant();
     if (!$tenant) {
         return response()->json(['error' => 'Tenant not resolved'], 404);
@@ -47,16 +46,22 @@ public function handleMessage(Request $request)
 
     if (!$apiKey || !str_starts_with($apiKey, 'sk-')) {
         return response()->json([
-            'reply' => "Hi! I'm ready to help, but the OpenAI API key isn't configured yet. Please contact your admin."
+            'reply' => "Hi! I'm ready to help, but it looks like the OpenAI API key hasn't been set up yet. 
+
+Please add your OpenAI API key in the integrations settings to activate me fully. 
+
+In the meantime, feel free to reach out via phone or email! 😊"
         ]);
     }
 
     $agent = (new LeadAgent($request->session_id))
-        ->setTenantContext($apiKey, $tenant->id);  
+        ->setTenantContext($apiKey, $tenant->id)
+        ->setTenantPrompt($tenant->chatbot_prompt);
 
     $response = $agent->handleMessage($request->message);
 
     return response()->json(['reply' => $response]);
+    
 }public function handleMessagePublic(Request $request)
     {
         $request->validate([
@@ -91,7 +96,8 @@ public function handleMessage(Request $request)
         }
 
         $agent = (new LeadAgent($request->session_id))
-            ->setTenantContext($apiKey, $tenant->id);
+            ->setTenantContext($apiKey, $tenant->id)
+            ->setTenantPrompt($tenant->chatbot_prompt);
 
         $reply = $agent->handleMessage($request->message);
 

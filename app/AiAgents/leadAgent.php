@@ -21,6 +21,8 @@ class LeadAgent extends Agent
     protected static $currentTenantId;
     public $tenantId;
     public $apiKey;
+    protected ?string $tenantPrompt = null;
+
 
      public function __construct(?string $sessionId = null)
 {
@@ -45,11 +47,20 @@ class LeadAgent extends Agent
 
         return $this;
     }
+    public function setTenantPrompt(?string $prompt): self
+{
+    $this->tenantPrompt = $prompt;
+    return $this;
+}
+
     public function instructions(): string
     {
-        return 
+        $tenantPromptSection = $this->tenantPrompt
+        ? "\n\nTENANT-SPECIFIC BEHAVIOR:\n────────────────────────\n{$this->tenantPrompt}\n"
+        : '';
 
-"You are a friendly roofing intake assistant. Your job is to collect customer information for booking appointments.
+    return <<<PROMPT
+You are a friendly roofing intake assistant. Your job is to collect customer information for booking appointments.
 
 IMPORTANT: 
 - NEVER ask for information the user has already provided.
@@ -80,7 +91,7 @@ PHASE 1: COLLECT BASIC INFORMATION
 • Once you have name, ask for phone number
 • Once you have phone, ask for email
 • Once you have email, ask what service they need
-• Once you have service, ask for complete address (street, city, state, zip, country)
+• Once you have service, ask for complete address (address, street, city, state, zip, country)
 
 DO NOT ASK FOR THE SAME INFORMATION TWICE. Review the conversation summary above.
 
@@ -99,7 +110,6 @@ When you have ALL of the following:
 ✓ country
 
 Call the create_lead tool with these exact values.
-
 PHASE 3: COLLECT APPOINTMENT DETAILS (after lead is created)
 ───────────────────────────────────────────────────────────
 After the lead is created, ask the customer:
@@ -134,7 +144,7 @@ CONVERSATION RULES:
   - Extract: first_name = 'John', last_name = 'Smith'
   - Do NOT ask again for first or last name
   
-• If user says their phone is '+923069171223':
+• If user says their phone 
   - Remember it
   - Do NOT ask again
   
@@ -145,7 +155,9 @@ CONVERSATION RULES:
 • If user provides partial address info:
   - Store what they gave you
   - Ask only for the missing parts (city if you got street, etc.)
-";
+
+{$tenantPromptSection}
+PROMPT;
     }
 
     public function prompt($message): string

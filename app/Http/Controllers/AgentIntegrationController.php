@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Twilio\Rest\Client;
 use Google\Client as GoogleClient;
+use Illuminate\Support\Facades\Http;
 class AgentIntegrationController extends Controller
 {
     public function index()
@@ -25,7 +26,7 @@ public function updateGoogle(Request $request)
 {
     $request->validate([
         'provider' => 'required',
-        'key' => 'required', // this is code from frontend
+        'key' => 'required', 
     ]);
 
     $tenant_agent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
@@ -131,9 +132,17 @@ public function updateOpenAI(Request $request)
 }
 public function getOpenAiKey()
 {
-    $integration = TenantAgentIntegration::first();
-    return response()->json(['key' => $integration->openai_api_key ?? null]);
+    $tenant_agent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
+
+    $integration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->id)
+        ->where('provider', 'openai')
+        ->first();
+
+    return response()->json([
+        'key' => $integration?->key
+    ]);
 }
+
 
 
 public function getGoogleAccessToken(Request $request)
@@ -273,6 +282,99 @@ public function disconnect(Request $request)
 
     return response()->json([
         'message' => ucfirst($request->provider) . ' disconnected successfully'
+    ]);
+}
+
+
+public function updateOutlook(Request $request)
+{
+    $request->validate([
+        'provider' => 'required',
+        'key' => 'required', 
+    ]);
+
+    $tenant_agent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
+
+    $response = Http::asForm()->post(
+        'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+        [
+            'client_id' => env('OUTLOOK_CLIENT_ID'),
+            'client_secret' => env('OUTLOOK_CLIENT_SECRET'),
+            'grant_type' => 'authorization_code',
+            'code' => $request->key,
+            'redirect_uri' => env('OUTLOOK_REDIRECT_URI'),
+            'scope' => 'offline_access Calendars.ReadWrite User.Read',
+        ]
+    );
+
+    if (!$response->successful()) {
+        return response()->json([
+            'error' => 'Failed to connect Outlook',
+            'details' => $response->body()
+        ], 400);
+    }
+
+    $token = $response->json();
+
+    $integration = TenantAgentIntegration::updateOrCreate(
+        [
+            'tenant_agent_id' => $tenant_agent->id,
+            'provider' => 'outlook',
+        ],
+        [
+            'key' => $token['access_token'],
+            'secret' => $token['refresh_token'] ?? '',
+            'meta' => json_encode([
+                'expires_in' => $token['expires_in'],
+                'created' => time(),
+            ]),
+        ]
+    );
+
+    return response()->json([
+        'message' => 'Outlook Calendar connected successfully!',
+        'integration' => $integration,
+    ]);
+}
+public function getOutlookAccessToken()
+{
+    $tenant_agent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
+
+    $integration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->id)
+        ->where('provider', 'outlook')
+        ->first();
+
+    if (!$integration) {
+        return response()->json(['error' => 'Outlook not connected'], 404);
+    }
+
+    if (!$integration->secret) {
+        return response()->json(['access_token' => $integration->key]);
+    }
+
+    $response = Http::asForm()->post(
+        'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+        [
+            'client_id' => env('OUTLOOK_CLIENT_ID'),
+            'client_secret' => env('OUTLOOK_CLIENT_SECRET'),
+            'grant_type' => 'refresh_token',
+            'refresh_token' => $integration->secret,
+            'scope' => 'offline_access Calendars.ReadWrite User.Read',
+        ]
+    );
+
+    $token = $response->json();
+
+    $integration->update([
+        'key' => $token['access_token'],
+        'meta' => json_encode([
+            'expires_in' => $token['expires_in'],
+            'updated_at' => now(),
+        ]),
+    ]);
+
+    return response()->json([
+        'access_token' => $token['access_token'],
     ]);
 }
 

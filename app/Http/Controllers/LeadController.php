@@ -157,41 +157,73 @@ $integration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->i
         ]
     ]);
 }
-
-
-    public function summarize(Request $request)
-    {
-        $lead = Lead::with('serviceType')->find($request->input('lead_id'));
-        if (!$lead) return response()->json(['error' => 'Lead not found'], 404);
-
-        $serviceType = optional($lead->serviceType)->name ?? 'Unspecified';
-
-        try {
-            $prompt = "Summarize this lead's details in 2-3 short sentences:
-            Name: {$lead->first_name} {$lead->last_name}
-            Email: {$lead->email}
-            Phone: {$lead->phone}
-            City: {$lead->city}
-            Service Type: {$serviceType}";
-
-            $response = Http::withToken(env('OPENAI_API_KEY'))
-                ->post('https://api.openai.com/v1/chat/completions', [
-                    'model' => 'gpt-3.5-turbo',
-                    'messages' => [
-                        ['role' => 'system', 'content' => 'You summarize customer lead information.'],
-                        ['role' => 'user', 'content' => $prompt],
-                    ],
-                    'max_tokens' => 100,
-                ]);
-
-            $summary = $response->json('choices.0.message.content') ?? 'No summary generated.';
-            $lead->update(['ai_summary' => $summary]);
-
-            return response()->json(['summary' => $summary]);
-        } catch (\Exception $e) {
-            return response()->json(['error' => 'Failed to generate summary', 'message' => $e->getMessage()], 500);
-        }
+private function getTenantOpenAiKey()
+{
+    $tenant = Helper::tenant();
+    if (!$tenant) {
+        return null;
     }
+
+    $tenantAgent = TenantAgent::where('tenant_id', $tenant->id)->first();
+    if (!$tenantAgent) {
+        return null;
+    }
+
+    $integration = TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
+        ->where('provider', 'openai')
+        ->first();
+
+    return $integration?->key
+        ?? $tenant->openai_api_key
+        ?? null;
+}
+
+
+   public function summarize(Request $request)
+{
+    $lead = Lead::with('serviceType')->find($request->input('lead_id'));
+    if (!$lead) {
+        return response()->json(['error' => 'Lead not found'], 404);
+    }
+
+    $apiKey = $this->getTenantOpenAiKey();
+    if (!$apiKey || !str_starts_with($apiKey, 'sk-')) {
+        return response()->json([
+            'error' => 'OpenAI API key not configured.'
+        ], 400);
+    }
+
+    $serviceType = optional($lead->serviceType)->name ?? 'Unspecified';
+
+    try {
+        $prompt = "Summarize this lead's details in 2-3 short sentences:
+Name: {$lead->first_name} {$lead->last_name}
+Email: {$lead->email}
+Phone: {$lead->phone}
+City: {$lead->city}
+Service Type: {$serviceType}";
+
+        $response = Http::withToken($apiKey)
+            ->post('https://api.openai.com/v1/chat/completions', [
+                'model' => 'gpt-3.5-turbo',
+                'messages' => [
+                    ['role' => 'system', 'content' => 'You summarize customer lead information.'],
+                    ['role' => 'user', 'content' => $prompt],
+                ],
+                'max_tokens' => 100,
+            ]);
+
+        $summary = $response->json('choices.0.message.content') ?? 'No summary generated.';
+        $lead->update(['ai_summary' => $summary]);
+
+        return response()->json(['summary' => $summary]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => 'Failed to generate summary',
+            'message' => $e->getMessage()
+        ], 500);
+    }
+}
 
 
     public function update(Request $request, Lead $lead)

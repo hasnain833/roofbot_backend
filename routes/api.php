@@ -49,6 +49,9 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::post('/tenant/integration/update-google', [AgentIntegrationController::class, 'updateGoogle']);
     Route::post('/tenant/integration/update-twilio', [AgentIntegrationController::class, 'updateTwilio']);
     Route::post('/tenant/integration/update-openai', [AgentIntegrationController::class, 'updateOpenAI']);
+    Route::post('/api/tenant/integration/update-outlook', [AgentIntegrationController::class, 'updateOutlook']);
+    Route::get('/api/tenant/integration/outlook-token', [AgentIntegrationController::class, 'getOutlookAccessToken']);
+
     
 Route::post('/tenant/integration/disconnect', [AgentIntegrationController::class, 'disconnect']);
 
@@ -131,33 +134,7 @@ Route::middleware('auth:sanctum')->group(function () {
         ]);
     });
 });
- Route::post('/test-lead-agent', function (Request $request) {
-
-    $tenant = Helper::tenant();
-
-    if (!$tenant || !$tenant->openai_api_key) {
-        return response()->json([
-            'error' => 'Tenant API key missing'
-        ], 400);
-    }
-
-    $message = $request->input('message', 'Hello');
-
-    $sessionId = "test-session-" . $tenant->id;
-
-    $agent = new leedAgent($sessionId, $tenant->openai_api_key);
-
-    $response = $agent->handleMessage($message);
-
-    return response()->json([
-        'tenant_id'     => $tenant->id,
-        'using_api_key' => substr($tenant->openai_api_key, 0, 8) . '********',
-        'session_id'    => $sessionId,
-        'sent_message'  => $message,
-        'agent_reply'   => $response
-    ]);
-});
-
+    
 
 Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/dashboard/stats', [DashboardController::class, 'stats']);
