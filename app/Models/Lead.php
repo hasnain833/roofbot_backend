@@ -24,8 +24,8 @@ class Lead extends Model
         'status',
         'service_type_id',
         'ai_chat_summary',
+        'missed_call_active',
     ];
-
     public function tenant()
     {
         return $this->belongsTo(Tenant::class);

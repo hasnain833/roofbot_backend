@@ -36,7 +36,7 @@ public function updateGoogle(Request $request)
     $client->setClientId(env('GOOGLE_CLIENT_ID'));
     $client->setClientSecret(env('GOOGLE_CLIENT_SECRET'));
     $client->setRedirectUri(env('GOOGLE_REDIRECT_URI'));
-    $client->setAccessType('offline'); // needed to get refresh token
+    $client->setAccessType('offline'); 
     $client->setScopes(['https://www.googleapis.com/auth/calendar']);
 
     try {
@@ -397,8 +397,8 @@ public function getTwilioCredentials(Request $request)
     }
 
     return response()->json([
-        'key' => $integration->key,        // SID
-        'secret' => $integration->secret,  // Auth Token
+        'key' => $integration->key,      
+        'secret' => $integration->secret,  
         'tenant_agent_id' => $tenant_agent->id
     ]);
 }

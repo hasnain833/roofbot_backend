@@ -22,6 +22,7 @@ class Appointment extends Model
         'end_time',
         'google_event_id',
         'reminder_sent',
+        'outlook_event_id',
     ];
 
     protected $casts = [

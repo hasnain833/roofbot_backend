@@ -93,8 +93,9 @@ Route::middleware('auth:sanctum')->group(function () {
 });
 
 Route::post('/twilio/status', [TwilioController::class, 'statusCallback']);
-
 Route::post('/twilio/inbound', [TwilioController::class, 'inbound']);
+Route::post('/twilio/voice/inbound', [TwilioController::class, 'handleInboundCall']);
+Route::post('/twilio/voice/status', [TwilioController::class, 'handleVoiceStatus']);
 
 
 Route::post('/n8n/appointment', function (Request $request) {
