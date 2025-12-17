@@ -36,12 +36,17 @@ class StripeWebhookController extends CashierWebhookController
         ) {
             $customerId = $object['customer'];
             $user = User::where('stripe_id', $customerId)->first();
-            if (!$user) return;
+            if (!$user)
+                return;
 
-            $sessionId = $object['latest_invoice'];
-            $invoice = $user->stripe()->invoices->retrieve($sessionId);
+            $invoiceId = $object['latest_invoice'] ?? null;
+            if (!$invoiceId)
+                return;
 
-            $setupAllowed = $invoice->lines->data[0]->metadata->should_add_setup_fee ?? 'no';
+            $invoice = $user->stripe()->invoices->retrieve($invoiceId);
+
+
+           $setupAllowed = $object['metadata']['should_add_setup_fee'] ?? 'no';
 
             if ($setupAllowed === 'yes') {
                 $user->invoiceFor(
@@ -56,25 +61,29 @@ class StripeWebhookController extends CashierWebhookController
         parent::handleCustomerSubscriptionUpdated($payload);
     }
     public function handleCustomerSubscriptionDeleted(array $payload)
-{
-    Log::info("Subscription deleted event processed", $payload);
-    return parent::handleCustomerSubscriptionDeleted($payload);
-}
+    {
+        Log::info("Subscription deleted event processed", $payload);
+        return parent::handleCustomerSubscriptionDeleted($payload);
+    }
 
 
     private function syncUserData(array $payload)
     {
         $object = $payload['data']['object'] ?? null;
-        if (!$object) return;
+        if (!$object)
+            return;
 
         $customerId = $object['customer'] ?? null;
-        if (!$customerId) return;
+        if (!$customerId)
+            return;
 
         $user = User::where('stripe_id', $customerId)->first();
-        if (!$user) return;
+        if (!$user)
+            return;
 
         $subscriptionId = $object['subscription'] ?? $object['id'] ?? null;
-        if (!$subscriptionId) return;
+        if (!$subscriptionId)
+            return;
 
         $subscription = $user->subscription('default');
 
@@ -92,7 +101,7 @@ class StripeWebhookController extends CashierWebhookController
                 'stripe_status' => $stripeSub->status,
                 'stripe_price' => $stripeSub->items->data[0]->price->id ?? null,
                 'quantity' => $stripeSub->items->data[0]->quantity ?? 1,
-                'trial_ends_at' => $trialEndsAt,  
+                'trial_ends_at' => $trialEndsAt,
                 'ends_at' => $stripeSub->current_period_end
                     ? Carbon::createFromTimestamp($stripeSub->current_period_end)
                     : null,
@@ -104,7 +113,8 @@ class StripeWebhookController extends CashierWebhookController
                 $plan = Plan::where('stripe_monthly_price_id', $priceId)
                     ->orWhere('stripe_yearly_price_id', $priceId)
                     ->first();
-                if ($plan) $user->plan_id = $plan->id;
+                if ($plan)
+                    $user->plan_id = $plan->id;
             }
 
         } else {

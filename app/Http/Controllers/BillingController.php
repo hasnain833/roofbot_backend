@@ -54,6 +54,10 @@ class BillingController extends Controller
                     ? Carbon::parse($subscription->trial_ends_at)->format('Y-m-d H:i:s')
                     : null,
                 'is_on_trial' => $subscription->onTrial(),
+                'ends_at' => $subscription->ends_at
+                    ? Carbon::parse($subscription->ends_at)->format('Y-m-d H:i:s')
+                    : null,
+
             ],
         ]);
     }
@@ -96,12 +100,12 @@ class BillingController extends Controller
                 'mode' => 'subscription',
                 'subscription_data' => [
                     'trial_period_days' => $trialDays,
-                ],
-                'metadata' => [
-                    'plan_id' => $plan->id,
-                    'user_id' => $user->id,
-                    'should_add_setup_fee' =>
-                        ($plan->slug === 'starter' && $isMonthly) ? 'yes' : 'no'
+                    'metadata' => [
+                        'should_add_setup_fee' =>
+                            ($plan->slug === 'starter' && $isMonthly) ? 'yes' : 'no',
+                        'plan_id' => $plan->id,
+                        'user_id' => $user->id,
+                    ],
                 ],
             ]);
 
@@ -135,9 +139,9 @@ class BillingController extends Controller
 
 
             $subscription = $user->newSubscription('default', $priceId)
+                ->trialDays(0)  
                 ->create();
 
-            // Update user's plan info
             $user->plan_id = $plan->id;
             $user->current_period_end = $subscription->asStripeSubscription()->current_period_end
                 ? Carbon::createFromTimestamp($subscription->asStripeSubscription()->current_period_end)
@@ -145,7 +149,7 @@ class BillingController extends Controller
             $user->subscription_status = $subscription->stripe_status;
             $user->save();
 
-            Log::info('Subscription created with trial via Cashier', [
+            Log::info('Subscription created ', [
                 'user_id' => $user->id,
                 'plan_id' => $plan->id,
                 'stripe_id' => $subscription->stripe_id,

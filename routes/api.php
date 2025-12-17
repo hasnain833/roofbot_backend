@@ -162,6 +162,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/subscription/cancel', [BillingController::class, 'cancelSubscription']);
     Route::post('/subscription/subscribe', [BillingController::class, 'createSubscription']);
     Route::post('/subscription/upgrade', [BillingController::class, 'upgradeSubscription']);
+    Route::post('/subscription/resume', [BillingController::class, 'resumeSubscription']);
 });
 
 Route::post('/stripe/webhook', [StripeWebhookController::class, 'handleWebhook'])->name('cashier.webhook');
