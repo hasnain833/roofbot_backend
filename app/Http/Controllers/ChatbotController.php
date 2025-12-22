@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Helper;
 use App\Models\TenantAgent;
+use App\Models\ServiceType;
 use Illuminate\Http\Request;
 use App\AiAgents\LeadAgent;
 use App\Models\Tenant;
@@ -23,7 +24,29 @@ public function handleMessage(Request $request)
         'message' => 'required|string',
     ]);
 
-    $tenant = Helper::tenant();
+  $tenant = Helper::tenant();
+
+if (!$tenant) {
+    return response()->json(['error'=>'Tenant not resolved'],404);
+}
+
+// REFRESH tenant with full fields
+$tenant->refresh();
+
+Log::info('CHATBOT TENANT AFTER FRESH', [
+    'id' => $tenant->id,
+    'chatbot_prompt' => $tenant->chatbot_prompt,
+    'chatbot_questions' => $tenant->chatbot_questions,
+]);
+
+$serviceTypes = ServiceType::where('tenant_id', $tenant->id)
+    ->select('id','name')
+    ->get();
+
+Log::info('CHATBOT SERVICE TYPES', [
+    'tenant_id' => $tenant->id,
+    'service_types_count' => $serviceTypes->count(),
+]);
     if (!$tenant) {
         return response()->json(['error' => 'Tenant not resolved'], 404);
     }
@@ -31,6 +54,8 @@ public function handleMessage(Request $request)
     $tenantAgent = TenantAgent::where('tenant_id', $tenant->id)
         ->where('id', $request->agent_id)
         ->first();
+   
+
 
     if (!$tenantAgent) {
         return response()->json(['error' => 'Invalid or unauthorized agent'], 404);
@@ -55,14 +80,19 @@ In the meantime, feel free to reach out via phone or email! 😊"
     }
 
     $agent = (new LeadAgent($request->session_id))
-        ->setTenantContext($apiKey, $tenant->id)
-        ->setTenantPrompt($tenant->chatbot_prompt);
+    ->setTenantContext($apiKey, $tenant->id)
+    ->setTenantPrompt($tenant->chatbot_prompt)
+    ->setCustomQuestions($tenant->chatbot_questions ?? [])
+    ->setServiceTypes($serviceTypes);
+
+
 
     $response = $agent->handleMessage($request->message);
 
     return response()->json(['reply' => $response]);
     
-}public function handleMessagePublic(Request $request)
+}
+public function handleMessagePublic(Request $request)
     {
         $request->validate([
             'agent_id' => 'required|integer',
@@ -80,6 +110,9 @@ In the meantime, feel free to reach out via phone or email! 😊"
         if (!$tenant) {
             return response()->json(['reply' => 'Tenant not found for this agent'], 404);
         }
+         $serviceTypes = ServiceType::where('tenant_id', $tenantAgent->id)
+          ->select('id', 'name')
+          ->get();
 
         $openAiIntegration = $tenantAgent->integrations()
             ->where('provider', 'openai')
@@ -97,7 +130,9 @@ In the meantime, feel free to reach out via phone or email! 😊"
 
         $agent = (new LeadAgent($request->session_id))
             ->setTenantContext($apiKey, $tenant->id)
-            ->setTenantPrompt($tenant->chatbot_prompt);
+            ->setTenantPrompt($tenant->chatbot_prompt)
+            ->setCustomQuestions($tenant->chatbot_questions ?? [])
+            ->setServiceTypes($serviceTypes);
 
         $reply = $agent->handleMessage($request->message);
 

@@ -356,8 +356,7 @@ Highlight intent, questions, tone, and next steps:\n\n{$chatText}";
             'statusCallbackEvent' => ['no-answer', 'busy', 'failed', 'completed'],
         ]);
 
-        // Fallback if no answer (but status callback handles post-call)
-        $response->say('Sorry, we missed you. We\'ll send a text message shortly.');
+        $response->say('Sorry, we missed your call. How we can help you today.');
 
         return response($response)->header('Content-Type', 'text/xml');
     }

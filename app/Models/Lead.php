@@ -23,6 +23,7 @@ class Lead extends Model
         'country',
         'status',
         'service_type_id',
+        'service_type_name',
         'ai_chat_summary',
         'missed_call_active',
     ];
@@ -36,10 +37,11 @@ class Lead extends Model
         return $this->belongsTo(User::class);
     }
 
-    public function serviceType()
-    {
-      return $this->belongsTo(\App\Models\ServiceType::class, 'service_type_id');
-    }
+  public function serviceType()
+{
+    return $this->belongsTo(ServiceType::class);
+}
+
     public function followups()
 {
     return $this->hasMany(Followup::class);

@@ -37,7 +37,7 @@ class AppointmentController extends Controller
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
             'notes' => 'nullable|string',
-            'service_type_id' => 'nullable|exists:service_types,id',
+            'service_type' => 'nullable|string|max:255',
             'start_time' => 'required|date',
             'end_time' => 'required|date|after:start_time',
         ]);
@@ -46,10 +46,11 @@ class AppointmentController extends Controller
         $validated['user_id'] = $request->user()->id;
 
         $appointment = Appointment::create($validated);
-
+        $this->createReminder($appointment);
         try {
             $lead = $appointment->lead;
-            $serviceType = optional($appointment->serviceType)->name;
+          $serviceType = $appointment->service_type ?? 'General Service';
+
 
             $tenantAgent = \App\Models\TenantAgent::where('tenant_id', $appointment->tenant_id)->first();
             if (!$tenantAgent) {
@@ -109,6 +110,18 @@ class AppointmentController extends Controller
             'data' => $appointment,
         ]);
     }
+    private function createReminder(Appointment $appointment)
+    {
+        $appointment->reminders()->delete(); 
+
+        \App\Models\Reminder::create([
+            'lead_id' => $appointment->lead_id,
+            'appointment_id' => $appointment->id,
+            'reminder_date' => Carbon::parse($appointment->start_time)->subHours(24),
+            'type' => 'appointment',
+            'done' => false,
+        ]);
+    }
     public function convertToJob($id, Request $request)
     {
         $tenant = $request->user()->tenant ?? Helper::tenant();
@@ -138,7 +151,8 @@ class AppointmentController extends Controller
             return response()->json(['error' => 'Job already exists'], 400);
         }
 
-        $serviceTypeName = $appointment->serviceType ? $appointment->serviceType->name : 'General Service';
+      $serviceTypeName = $appointment->service_type ?? 'General Service';
+
         \Log::info('ServiceType', ['serviceType' => $appointment->serviceType]);
 
         $job = \App\Models\CrmJob::create([
@@ -172,10 +186,13 @@ class AppointmentController extends Controller
             'description',
             'notes',
             'status',
+            'service_type',
             'start_time',
             'end_time'
         ]));
-
+        if ($request->has('start_time')) {
+            $this->createReminder($appointment);
+        }
         if ($appointment->google_event_id) {
             dispatch(new SyncAppointmentToGoogle($appointment, true));
         }
@@ -214,7 +231,7 @@ class AppointmentController extends Controller
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
             'notes' => 'nullable|string',
-            'service_type_id' => 'nullable|exists:service_types,id',
+            'service_type' => 'nullable|string|max:255',
             'start_time' => 'required|date',
             'end_time' => 'required|date|after:start_time',
         ]);
@@ -222,10 +239,10 @@ class AppointmentController extends Controller
         $validated['user_id'] = null;
 
         $appointment = Appointment::create($validated);
-        // In publicStore, replace the try block for payload with:
+       
         try {
             $lead = $appointment->lead;
-            $serviceType = optional($appointment->serviceType)->name;
+           $serviceType = $appointment->service_type ?? 'General Service';
 
             $tenantAgent = \App\Models\TenantAgent::where('tenant_id', $appointment->tenant_id)->first();
             if (!$tenantAgent) {

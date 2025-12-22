@@ -102,7 +102,7 @@ PROMPT;
     public function book_appointment(
         string $lead_id,
         string $title,
-        int $service_type_id,
+        int $service_type,
         string $start_time,
         string $end_time,
         string $description = '',
@@ -119,7 +119,7 @@ PROMPT;
                 'title' => $title,
                 'description' => $description,
                 'notes' => $notes,
-                'service_type_id' => $service_type_id,
+                'service_type' => $service_type,
                 'start_time' => $start_time,
                 'end_time' => $end_time,
             ]);

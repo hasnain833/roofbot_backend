@@ -17,10 +17,12 @@ use App\Http\Controllers\CrmJobController;
 use App\Http\Controllers\BillingController;
 use App\Http\Controllers\TenantSmsTemplateController;
 use App\Http\Controllers\SettingsController;
+use App\Http\Controllers\ServiceTypeController;
 use App\AiAgents\leedAgent;
 use App\Helper;
 use App\Http\Controllers\StripeWebhookController;
 use Laravel\Cashier\Http\Controllers\WebhookController;
+
 
 
 Route::post('/auth/login', [LoginController::class, 'store']);
@@ -51,13 +53,16 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::post('/tenant/integration/update-openai', [AgentIntegrationController::class, 'updateOpenAI']);
     Route::post('/api/tenant/integration/update-outlook', [AgentIntegrationController::class, 'updateOutlook']);
     Route::get('/api/tenant/integration/outlook-token', [AgentIntegrationController::class, 'getOutlookAccessToken']);
-
+    Route::post('/tenant/integration/update-sendgrid', [AgentIntegrationController::class, 'updateSendgrid']);
     
 Route::post('/tenant/integration/disconnect', [AgentIntegrationController::class, 'disconnect']);
 
     Route::get('/tenant', [CompanyController::class, 'index']);
     Route::put('/tenant', [CompanyController::class, 'update']);
 });
+Route::middleware('auth:sanctum')->post(  '/tenant/phone',
+    [UserController::class, 'updateTenantPhone']
+);
 
 // Route::get('/chatbot/{botToken}', [ChatbotController::class, 'iframeChatbot']);
 
@@ -155,6 +160,16 @@ Route::middleware(['auth:sanctum','admin'])->group(function () {
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/plans', [BillingController::class, 'plans']);
 });
+
+
+Route::middleware(['auth:sanctum'])->group(function () {
+    Route::get('/service-types', [ServiceTypeController::class, 'index']);
+    Route::post('/service-types', [ServiceTypeController::class, 'store']);
+    Route::get('/service-types/{serviceType}', [ServiceTypeController::class, 'show']);
+    Route::put('/service-types/{serviceType}', [ServiceTypeController::class, 'update']);
+    Route::delete('/service-types/{serviceType}', [ServiceTypeController::class, 'destroy']);
+});
+
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/subscription', [BillingController::class, 'getSubscription']);

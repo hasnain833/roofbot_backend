@@ -17,6 +17,7 @@ class SettingsController extends Controller
             'data' => [
                 'company' => $tenant->company,
                 'chatbot_prompt' => $tenant->chatbot_prompt,
+                'chatbot_questions' => $tenant->chatbot_questions ?? [],
             ]
         ]);
     }
@@ -28,16 +29,19 @@ class SettingsController extends Controller
 
         $request->validate([
             'chatbot_prompt' => 'nullable|string',
+            'chatbot_questions' => 'nullable|array',
         ]);
 
         $tenant->update([
             'chatbot_prompt' => $request->chatbot_prompt,
+            'chatbot_questions' => $request->chatbot_questions,
         ]);
 
         return response()->json([
             'message' => 'Settings updated successfully',
             'company' => $tenant->company,
             'chatbot_prompt' => $tenant->chatbot_prompt,
+            'chatbot_questions' => $tenant->chatbot_questions,
         ]);
     }
 
@@ -48,6 +52,7 @@ class SettingsController extends Controller
 
         $tenant->update([
             'chatbot_prompt' => null,
+            'chatbot_questions' => null,
         ]);
 
         return response()->json([

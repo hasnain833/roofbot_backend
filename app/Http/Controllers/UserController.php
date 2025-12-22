@@ -9,6 +9,7 @@ use Illuminate\Validation\Rule;
 use App\Http\Resources\UserResource;
 use App\Models\TenantUser;
 use Illuminate\Support\Facades\Auth;
+use App\Helper;
 
 class UserController extends Controller
 {
@@ -183,6 +184,23 @@ public function updatePasswordProfile(Request $request)
     $user->save();
 
     return response()->json(['message' => 'Password updated successfully', 'user' => $user], 200);
+}
+public function updatePhone(Request $request)
+{
+    $request->validate([
+        'phone' => ['nullable', 'string', 'regex:/^\+[1-9]\d{1,14}$/'],
+    ]);
+
+    $tenant = Helper::tenant();
+
+    $tenant->update([
+        'phone' => $request->phone,
+    ]);
+
+    return response()->json([
+        'success' => true,
+        'phone' => $tenant->phone,
+    ]);
 }
 
 

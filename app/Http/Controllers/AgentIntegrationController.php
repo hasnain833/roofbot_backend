@@ -377,7 +377,48 @@ public function getOutlookAccessToken()
         'access_token' => $token['access_token'],
     ]);
 }
+public function updateSendgrid(Request $request)
+{
+    $tenant_agent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
 
+    $request->validate([
+        'key' => 'required|string',
+    ]);
+
+    // Optional: Test the API key (recommended)
+    try {
+        $response = Http::withHeaders([
+            'Authorization' => 'Bearer ' . $request->key,
+        ])->get('https://api.sendgrid.com/v3/user/profile');
+
+        if (!$response->successful()) {
+            return response()->json([
+                'message' => 'Invalid SendGrid API key. Please check your key.',
+            ], 400);
+        }
+    } catch (\Exception $e) {
+        return response()->json([
+            'message' => 'Failed to validate SendGrid key: ' . $e->getMessage(),
+        ], 400);
+    }
+
+    $integration = TenantAgentIntegration::updateOrCreate(
+        [
+            'tenant_agent_id' => $tenant_agent->id,
+            'provider' => 'sendgrid',
+        ],
+        [
+            'key' => $request->key,
+            'secret' => '', // Not needed
+            'meta' => json_encode(['note' => 'SendGrid API key']),
+        ]
+    );
+
+    return response()->json([
+        'message' => 'SendGrid connected successfully!',
+        'integration' => $integration,
+    ]);
+}
 
 
 public function getTwilioCredentials(Request $request)

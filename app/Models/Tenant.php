@@ -14,7 +14,12 @@ class Tenant extends Model
         'domain',
         'user_id',
         'chatbot_prompt',
+         'phone',
     ];
+    protected $casts = [
+    'chatbot_questions' => 'array',
+];
+
 
     public function owner()
     {

@@ -11,6 +11,7 @@ class Reminder extends Model
 
     protected $fillable = [
         'lead_id',
+        'appointment_id',
         'reminder_date',
         'type',
         'done',
