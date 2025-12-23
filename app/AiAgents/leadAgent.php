@@ -9,15 +9,16 @@ use App\Models\Appointment;
 use App\Jobs\SyncAppointmentToGoogle;
 use App\Jobs\SyncAppointmentToOutlook;
 use Illuminate\Support\Facades\Log;
+use Twilio\Rest\Client;
 
 
 class LeadAgent extends Agent
 {
     protected $model = 'gpt-4o-mini';
-    protected $history = 'cache'; 
+    protected $history = 'cache';
     protected $provider = 'default';
     protected $temperature = 0.7;
-    protected $contextWindowSize = 8000; 
+    protected $contextWindowSize = 8000;
     protected $storeMeta = true;
     protected static $currentTenantId;
     public $tenantId;
@@ -27,23 +28,23 @@ class LeadAgent extends Agent
     protected array $serviceTypes = [];
 
 
-     public function __construct(?string $sessionId = null)
-{
-    parent::__construct(env('OPENAI_API_KEY', 'temporary-placeholder-key'));
+    public function __construct(?string $sessionId = null)
+    {
+        parent::__construct(env('OPENAI_API_KEY', 'temporary-placeholder-key'));
 
-    if ($sessionId) {
-        $this->customSessionId = $sessionId;
-    }
-    if (static::$currentTenantId !== null) {
+        if ($sessionId) {
+            $this->customSessionId = $sessionId;
+        }
+        if (static::$currentTenantId !== null) {
             $this->tenantId = static::$currentTenantId;
         }
-}
+    }
 
 
     public function setTenantContext(string $apiKey, int $tenantId): self
     {
         $this->apiKey = $apiKey;
-      $this->tenantId = $tenantId;
+        $this->tenantId = $tenantId;
 
         static::$currentTenantId = $tenantId;
         config(['laragent.providers.default.api_key' => $apiKey]);
@@ -51,46 +52,39 @@ class LeadAgent extends Agent
         return $this;
     }
     public function setTenantPrompt(?string $prompt): self
-{
-    $this->tenantPrompt = $prompt;
-    return $this;
-}
-public function setCustomQuestions(array $questions): self
-{
-    $this->customQuestions = $questions;
-    return $this;
-}
+    {
+        $this->tenantPrompt = $prompt;
+        return $this;
+    }
+    public function setCustomQuestions(array $questions): self
+    {
+        $this->customQuestions = $questions;
+        return $this;
+    }
 
-public function setServiceTypes($types): self
-{
-    $this->serviceTypes = $types->toArray();
-    return $this;
-}
+    public function setServiceTypes($types): self
+    {
+        $this->serviceTypes = $types->toArray();
+        return $this;
+    }
 
 
     public function instructions(): string
     {
-        Log::info('CHATBOT INSTRUCTIONS GENERATED', [
-        'tenant_id' => $this->tenantId,
-        'tenant_prompt' => $this->tenantPrompt,
-        'custom_questions' => $this->customQuestions,
-        'service_types' => $this->serviceTypes,
-    ]);
-
         $tenantPromptSection = $this->tenantPrompt
-        ? "\n\nTENANT-SPECIFIC BEHAVIOR:\n────────────────────────\n{$this->tenantPrompt}\n"
-        : '';
-      $serviceTypeText = collect($this->serviceTypes)
-    ->pluck('name')
-    ->map(fn ($name) => "- {$name}")
-    ->implode("\n");
+            ? "\n\nTENANT-SPECIFIC BEHAVIOR:\n────────────────────────\n{$this->tenantPrompt}\n"
+            : '';
+        $serviceTypeText = collect($this->serviceTypes)
+            ->pluck('name')
+            ->map(fn($name) => "- {$name}")
+            ->implode("\n");
 
 
-$customQuestionsText = collect($this->customQuestions)->map(
-    fn ($q, $i) => ($i + 1) . ". {$q['question']}"
-)->implode("\n");
+        $customQuestionsText = collect($this->customQuestions)->map(
+            fn($q, $i) => ($i + 1) . ". {$q['question']}"
+        )->implode("\n");
 
-    return <<<PROMPT
+        return <<<PROMPT
 You are a friendly roofing intake assistant. Your job is to collect customer information for booking appointments.
 
 IMPORTANT: 
@@ -119,7 +113,8 @@ PHASE 1: COLLECT BASIC INFORMATION
 • Once you have email, ask what service they need from the available services listed
 • The service must match ONE of the tenant's service types exactly
 • Once you have service, ask for complete address (address, street, city, state, zip, country)
-
+• once address is recieved must call create_lead toll then ask for appointment date and time. 
+• Dont tell users that you created a lead.
 DO NOT ASK FOR THE SAME INFORMATION TWICE. Review the conversation summary above.
 
 PHASE 2: CREATE LEAD (when all info is collected)
@@ -129,7 +124,7 @@ When you have ALL of the following:
 ✓ last_name  
 ✓ phone
 ✓ email
-✓ service_type 
+✓ service_type_name
 ✓ address (street)
 ✓ city
 ✓ state
@@ -172,6 +167,8 @@ CRITICAL RULES:
 ✓ Keep responses brief (1-2 sentences per message)
 ✓ Only ask for ONE missing piece of information at a time
 ✓ Before calling create_lead, ensure ALL required fields are ready
+✓ Must create a lead when required information is collected 
+✓ When lead is created must ask For Yes to book appointment
 ✓ Only call book_appointment after user provides appointment date/time
 
 CONVERSATION RULES:
@@ -194,7 +191,6 @@ ADDITIONAL TENANT QUESTIONS:
 {$customQuestionsText}
 
 RULES FOR CUSTOM QUESTIONS:
-• Ask these AFTER lead is created
 • Ask ONE question at a time
 • Store answers internally
 • Do NOT repeat answered questions
@@ -204,13 +200,50 @@ PROMPT;
 
     public function prompt($message): string
     {
-      return (string) ($message ?? '');
+        $tenantPrompt = $this->tenantPrompt ?? '';
+
+        $serviceTypesText = collect($this->serviceTypes)
+            ->pluck('name')
+            ->map(fn($name) => "- {$name}")
+            ->implode("\n");
+
+        $customQuestionsText = collect($this->customQuestions)
+            ->map(fn($q, $i) => ($i + 1) . ". {$q['question']}")
+            ->implode("\n");
+
+        $basePrompt = <<<PROMPT
+{$tenantPrompt}
+
+AVAILABLE SERVICE TYPES:
+{$serviceTypesText}
+
+CUSTOM QUESTIONS:
+{$customQuestionsText}
+
+USER MESSAGE:
+{$message}
+PROMPT;
+
+        return $basePrompt;
     }
+
 
     public function handleMessage($message): string
     {
-        return $this->ask($message);
+        $prompt = $this->prompt($message);
+        return $this->ask($prompt);
     }
+    protected function closestMatch(string $input, array $options): string
+    {
+        foreach ($options as $option) {
+            if (stripos($input, $option) !== false) {
+                return $option;
+            }
+        }
+        return $options[0] ?? 'General';
+    }
+
+
 
     #[Tool(description: 'Create a new lead in the database. Call this ONLY after collecting: first_name, last_name, phone, email, service_type_name, address, city, state, zip, country. Returns the created lead ID.')]
     public function create_lead(
@@ -227,11 +260,20 @@ PROMPT;
         string $Status = 'New'
     ): string {
         try {
-            // Validate required fields
-            if (empty($first_name) || empty($last_name) || empty($phone) || empty($email) ||
-                empty($address) || empty($city) || empty($state) || empty($zip) || empty($country)) {
+            if (
+                empty($first_name) || empty($last_name) || empty($phone) || empty($email) ||
+                empty($address) || empty($city) || empty($state) || empty($zip) || empty($country)
+            ) {
                 return "Error: Missing required information. Please provide all fields.";
             }
+            $serviceNames = collect($this->serviceTypes)->pluck('name')->toArray();
+            $service_type_name = $this->closestMatch($service_type_name, $serviceNames);
+
+            $serviceType = \App\Models\ServiceType::where('tenant_id', $this->tenantId)
+                ->where('name', $service_type_name)
+                ->first();
+
+
 
             $lead = Lead::create([
                 'tenant_id' => $this->tenantId,
@@ -240,15 +282,59 @@ PROMPT;
                 'phone' => $phone,
                 'email' => $email,
                 'service_type' => $service_type_name,
+                'service_type_id' => $serviceType?->id,
                 'address' => $address,
-                'state' => $state,
                 'city' => $city,
+                'state' => $state,
                 'zip' => $zip,
                 'country' => $country,
-                'Status' => $Status,
+                'status' => $Status,
             ]);
 
-            Log::info('Lead created', [
+            if (!empty($lead->phone)) {
+                $tenant_agent = \App\Models\TenantAgent::where('tenant_id', $this->tenantId)->first();
+                $integration = \App\Models\TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->id)
+                    ->where('provider', 'twilio')
+                    ->first();
+
+                if ($integration) {
+                    try {
+                        $client = new Client($integration->key, $integration->secret);
+                        $numbers = $client->incomingPhoneNumbers->read();
+                        $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
+                        $template = \App\Models\TenantSmsTemplate::where('tenant_id', $this->tenantId)->first();
+                        $body = $template ? $template->message : "Hello {first_name}, thank you for showing interest in {service_type} services.";
+
+                        $body = str_replace('{first_name}', $lead->first_name, $body);
+                        $body = str_replace( '{service_type}',$lead->service_type,$body);
+
+
+
+
+                        $client->messages->create($lead->phone, [
+                            'from' => $fromNumber,
+                            'body' => $body,
+                        ]);
+
+                        \App\Models\Message::create([
+                            'lead_id' => $lead->id,
+                            'text' => $body,
+                            'out' => true,
+                            'status' => 'sent',
+                        ]);
+
+                    } catch (\Exception $e) {
+                        Log::error("Twilio send failed: " . $e->getMessage());
+                        return response()->json([
+                            'message' => 'Lead created but failed to send SMS',
+                            'sms_error' => $e->getMessage(),
+                            'data' => $lead
+                        ], 200);
+                    }
+                }
+            }
+
+            Log::info('Lead created via chatbot', [
                 'lead_id' => $lead->id,
                 'tenant_id' => $this->tenantId,
                 'name' => "{$first_name} {$last_name}",
@@ -256,6 +342,7 @@ PROMPT;
             ]);
 
             return (string) $lead->id;
+
         } catch (\Exception $e) {
             Log::error('Lead creation failed', [
                 'error' => $e->getMessage(),
@@ -264,6 +351,7 @@ PROMPT;
             return "Error creating lead: " . $e->getMessage();
         }
     }
+
 
     #[Tool(description: 'Book an appointment for a lead. Call this ONLY after the lead is created and you have appointment date/time. Requires lead_id, title, service_type, start_time (ISO 8601), and end_time (ISO 8601).')]
     public function book_appointment(
@@ -292,12 +380,12 @@ PROMPT;
                 'end_time' => $end_time,
             ]);
             try {
-            dispatch(new SyncAppointmentToGoogle($appointment));
-            dispatch(new SyncAppointmentToOutlook($appointment));
+                dispatch(new SyncAppointmentToGoogle($appointment));
+                dispatch(new SyncAppointmentToOutlook($appointment));
 
-        } catch (\Exception $e) {
-           
-        }
+            } catch (\Exception $e) {
+
+            }
 
             Log::info('Appointment booked via chatbot', [
                 'lead_id' => $lead_id,
