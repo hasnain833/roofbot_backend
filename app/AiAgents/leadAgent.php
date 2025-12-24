@@ -10,6 +10,9 @@ use App\Jobs\SyncAppointmentToGoogle;
 use App\Jobs\SyncAppointmentToOutlook;
 use Illuminate\Support\Facades\Log;
 use Twilio\Rest\Client;
+use App\Models\Reminder;
+use Carbon\Carbon;
+
 
 
 class LeadAgent extends Agent
@@ -114,7 +117,7 @@ PHASE 1: COLLECT BASIC INFORMATION
 • The service must match ONE of the tenant's service types exactly
 • Once you have service, ask for complete address (address, street, city, state, zip, country)
 • once address is recieved must call create_lead toll then ask for appointment date and time. 
-• Dont tell users that you created a lead.
+• Dont tell users that you created a lead or calling create_lead tool for lead creation.
 DO NOT ASK FOR THE SAME INFORMATION TWICE. Review the conversation summary above.
 
 PHASE 2: CREATE LEAD (when all info is collected)
@@ -132,7 +135,23 @@ When you have ALL of the following:
 ✓ country
 
 Call the create_lead tool with these exact values.you must not call before taking info.
-PHASE 3: COLLECT APPOINTMENT DETAILS (after lead is created)
+
+
+PHASE 3: ASK CUSTOM TENANT QUESTIONS
+────────────────────────────────────
+{$customQuestionsText}
+After the lead is created:
+• Ask ALL tenant custom questions one by one
+• After user answers a question:
+  - Call save_custom_answer tool with:
+    • lead_id
+    • question
+    • answer
+• Do NOT repeat already answered questions
+• Do NOT ask appointment date until all custom questions are answered
+
+
+PHASE 4: COLLECT APPOINTMENT DETAILS (after lead is created and custom questions are asked)
 ───────────────────────────────────────────────────────────
 After the lead is created, ask the customer:
 'What date and time work best for your appointment? Please provide in format: MM/DD/YY H:MM AM/PM (for example: 12/25/25 2:00 PM)'
@@ -144,7 +163,7 @@ When user provides the date/time:
 3. Calculate end time as 1 hour after start time
 4. Call book_appointment tool
 
-PHASE 4: CONFIRMATION & BOOKING
+PHASE 5: CONFIRMATION & BOOKING
 ────────────────────────────────
 After booking, respond with a friendly confirmation.
 After appointment is booked, clear all data for the next customer.
@@ -167,9 +186,16 @@ CRITICAL RULES:
 ✓ Keep responses brief (1-2 sentences per message)
 ✓ Only ask for ONE missing piece of information at a time
 ✓ Before calling create_lead, ensure ALL required fields are ready
+✓ Call create_lead only once per session
 ✓ Must create a lead when required information is collected 
-✓ When lead is created must ask For Yes to book appointment
+✓ When lead is created must ask custom questions {$customQuestionsText}
+✓ when lead is created and custom questions are asked ,ask for appointment date and time
 ✓ Only call book_appointment after user provides appointment date/time
+If there exists any tenant custom question
+that does NOT have a saved answer:
+ DO NOT ask for appointment date
+ DO NOT call book_appointment
+ Ask the next unanswered custom question
 
 CONVERSATION RULES:
 ──────────────────
@@ -186,14 +212,12 @@ CONVERSATION RULES:
   - Store what they gave you
   - Ask only for the missing parts (city if you got street, etc.)
 
-ADDITIONAL TENANT QUESTIONS:
-───────────────────────────
-{$customQuestionsText}
+INTERNAL MEMORY:
+───────────────
+Answered custom questions are those
+that have already been saved using save_custom_answer tool.
+Never ask them again.
 
-RULES FOR CUSTOM QUESTIONS:
-• Ask ONE question at a time
-• Store answers internally
-• Do NOT repeat answered questions
 {$tenantPromptSection}
 PROMPT;
     }
@@ -270,8 +294,13 @@ PROMPT;
             $service_type_name = $this->closestMatch($service_type_name, $serviceNames);
 
             $serviceType = \App\Models\ServiceType::where('tenant_id', $this->tenantId)
-                ->where('name', $service_type_name)
+                ->whereRaw('LOWER(name) = ?', [strtolower($service_type_name)])
                 ->first();
+
+            if (!$serviceType) {
+                $serviceType = \App\Models\ServiceType::where('tenant_id', $this->tenantId)->first();
+            }
+
 
 
 
@@ -281,7 +310,7 @@ PROMPT;
                 'last_name' => $last_name,
                 'phone' => $phone,
                 'email' => $email,
-                'service_type' => $service_type_name,
+                'service_type_name' => $service_type_name,
                 'service_type_id' => $serviceType?->id,
                 'address' => $address,
                 'city' => $city,
@@ -302,11 +331,14 @@ PROMPT;
                         $client = new Client($integration->key, $integration->secret);
                         $numbers = $client->incomingPhoneNumbers->read();
                         $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
-                        $template = \App\Models\TenantSmsTemplate::where('tenant_id', $this->tenantId)->first();
+                        $template = \App\Models\TenantSmsTemplate::where('tenant_id', $this->tenantId)
+                            ->where('type', 'lead')
+                            ->first();
+
                         $body = $template ? $template->message : "Hello {first_name}, thank you for showing interest in {service_type} services.";
 
                         $body = str_replace('{first_name}', $lead->first_name, $body);
-                        $body = str_replace( '{service_type}',$lead->service_type,$body);
+                         $body = str_replace('{service_type}', optional($lead->serviceType)->name ?? ' services', $body);
 
 
 
@@ -352,6 +384,35 @@ PROMPT;
         }
     }
 
+#[Tool(description: 'Save answer to a custom tenant question for a lead')]
+public function save_custom_answer(
+    string $lead_id,
+    string $question,
+    string $answer
+): string {
+    try {
+        \App\Models\LeadCustomAnswer::updateOrCreate(
+            [
+                'lead_id' => $lead_id,
+                'question' => $question,
+            ],
+            [
+                'tenant_id' => $this->tenantId,
+                'answer' => $answer,
+            ]
+        );
+
+        return 'saved';
+    } catch (\Exception $e) {
+        Log::error('Custom answer save failed', [
+            'error' => $e->getMessage(),
+            'tenant_id' => $this->tenantId,
+        ]);
+
+        return 'error';
+    }
+}
+
 
     #[Tool(description: 'Book an appointment for a lead. Call this ONLY after the lead is created and you have appointment date/time. Requires lead_id, title, service_type, start_time (ISO 8601), and end_time (ISO 8601).')]
     public function book_appointment(
@@ -364,7 +425,6 @@ PROMPT;
         string $notes = ''
     ): string {
         try {
-            // Validate required fields
             if (empty($lead_id) || empty($title) || empty($start_time) || empty($end_time)) {
                 return "Error: Missing required appointment information.";
             }
@@ -379,6 +439,52 @@ PROMPT;
                 'start_time' => $start_time,
                 'end_time' => $end_time,
             ]);
+            $lead = \App\Models\Lead::find($lead_id);
+
+            if ($lead && $lead->phone) {
+
+                $tenantAgent = \App\Models\TenantAgent::where('tenant_id', $this->tenantId)->first();
+
+                $twilioIntegration = \App\Models\TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
+                    ->where('provider', 'twilio')
+                    ->first();
+
+                if ($twilioIntegration) {
+
+                    $client = new Client($twilioIntegration->key, $twilioIntegration->secret);
+                    $numbers = $client->incomingPhoneNumbers->read();
+                    $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
+
+                    $template = \App\Models\TenantSmsTemplate::where('tenant_id', $this->tenantId)
+                        ->where('type', 'appointment')
+                        ->first();
+
+                    $body = $template
+                        ? $template->message
+                        : "Hi {first_name}, your appointment for {service_type} is scheduled on {date_time}.";
+
+                    $body = str_replace('{first_name}', $lead->first_name, $body);
+                    $body = str_replace('{service_type}', $service_type, $body);
+                    $body = str_replace(
+                        '{date_time}',
+                        Carbon::parse($start_time)->format('M d, Y h:i A'),
+                        $body
+                    );
+
+                    $client->messages->create($lead->phone, [
+                        'from' => $fromNumber,
+                        'body' => $body,
+                    ]);
+
+                    \App\Models\Message::create([
+                        'lead_id' => $lead->id,
+                        'text' => $body,
+                        'out' => true,
+                        'status' => 'sent',
+                    ]);
+                }
+            }
+
             try {
                 dispatch(new SyncAppointmentToGoogle($appointment));
                 dispatch(new SyncAppointmentToOutlook($appointment));

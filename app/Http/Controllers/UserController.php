@@ -185,7 +185,7 @@ public function updatePasswordProfile(Request $request)
 
     return response()->json(['message' => 'Password updated successfully', 'user' => $user], 200);
 }
-public function updatePhone(Request $request)
+public function updateTenantPhone(Request $request)
 {
     $request->validate([
         'phone' => ['nullable', 'string', 'regex:/^\+[1-9]\d{1,14}$/'],
@@ -200,6 +200,14 @@ public function updatePhone(Request $request)
     return response()->json([
         'success' => true,
         'phone' => $tenant->phone,
+    ]);
+}
+public function showPhone(Request $request)
+{
+     $tenant = Helper::tenant(); 
+
+    return response()->json([
+        'phone' => $tenant->phone ?? null,
     ]);
 }
 

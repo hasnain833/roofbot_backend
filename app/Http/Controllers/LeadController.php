@@ -83,7 +83,7 @@ class LeadController extends Controller
             'tenant_id' => $tenant->id,
             'user_id' => Auth::id(),
         ]);
-       $this->createFollowups($lead);
+        $this->createFollowups($lead);
 
         if ($lead->phone) {
             $tenant_agent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
@@ -96,8 +96,11 @@ class LeadController extends Controller
                     $client = new Client($integration->key, $integration->secret);
                     $numbers = $client->incomingPhoneNumbers->read();
                     $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
-                    $template = \App\Models\TenantSmsTemplate::where('tenant_id', $tenant->id)->first();
-                    $body = $template ? $template->message : "Hello {first_name}, thank you for showing interest in {service_type} services. when would you like to book an appointment with us?";
+                    $template = \App\Models\TenantSmsTemplate::where('tenant_id', $tenant->id)
+                        ->where('type', 'lead')
+                        ->first();
+
+                    $body = $template ? $template->message : "Hello {first_name}, thank you for showing interest in {service_type} services.";
 
                     $body = str_replace('{first_name}', $lead->first_name, $body);
                     $body = str_replace('{service_type}', optional($lead->serviceType)->name ?? ' services', $body);
@@ -178,7 +181,7 @@ class LeadController extends Controller
             ], 400);
         }
 
-        $serviceType = $lead->serviceType?->name  ?? $lead->service_type_name?? 'Unspecified';
+        $serviceType = $lead->serviceType?->name ?? $lead->service_type_name ?? 'Unspecified';
 
 
         try {

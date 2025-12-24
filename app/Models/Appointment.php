@@ -49,6 +49,9 @@ class Appointment extends Model
 {
     return $this->belongsTo(ServiceType::class);
 }
-
+ public function reminders()
+    {
+        return $this->hasMany(Reminder::class);
+    }
 }
 

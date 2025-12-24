@@ -60,9 +60,10 @@ Route::post('/tenant/integration/disconnect', [AgentIntegrationController::class
     Route::get('/tenant', [CompanyController::class, 'index']);
     Route::put('/tenant', [CompanyController::class, 'update']);
 });
-Route::middleware('auth:sanctum')->post(  '/tenant/phone',
-    [UserController::class, 'updateTenantPhone']
-);
+Route::middleware('auth:sanctum')->group(function () {
+     Route::post(  '/tenant/phone', [UserController::class, 'updateTenantPhone']);
+     Route::get(  '/tenant/phone', [UserController::class, 'showPhone']);
+});
 
 // Route::get('/chatbot/{botToken}', [ChatbotController::class, 'iframeChatbot']);
 

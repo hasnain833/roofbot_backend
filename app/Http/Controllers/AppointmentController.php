@@ -10,8 +10,11 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Auth;
 use App\Jobs\SyncAppointmentToGoogle;
 use App\Jobs\SyncAppointmentToOutlook;
-
 use Carbon\Carbon;
+use Twilio\Rest\Client;
+use App\Models\TenantSmsTemplate;
+use App\Models\TenantAgent;
+use App\Models\Message;
 
 class AppointmentController extends Controller
 {
@@ -47,6 +50,70 @@ class AppointmentController extends Controller
 
         $appointment = Appointment::create($validated);
         $this->createReminder($appointment);
+       
+try {
+    $lead = $appointment->lead;
+
+    if ($lead && $lead->phone) {
+
+        $tenantAgent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
+
+        $twilioIntegration = TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
+            ->where('provider', 'twilio')
+            ->first();
+
+        if ($twilioIntegration) {
+
+            $client = new Client(
+                $twilioIntegration->key,
+                $twilioIntegration->secret
+            );
+
+            $numbers = $client->incomingPhoneNumbers->read();
+            $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
+
+       
+            $template = TenantSmsTemplate::where('tenant_id', Helper::tenant()->id)
+                ->where('type', 'appointment')
+                ->first();
+
+            $defaultBody =
+                "Hi {first_name}, your appointment for {service_type} is scheduled on {date_time}. See you soon!";
+
+            $body = $template ? $template->message : $defaultBody;
+
+       
+            $body = str_replace('{first_name}', $lead->first_name, $body);
+            $body = str_replace(
+                '{service_type}',
+                $appointment->service_type ?? 'our services',
+                $body
+            );
+            $body = str_replace(
+                '{date_time}',
+                Carbon::parse($appointment->start_time)->format('M d, Y h:i A'),
+                $body
+            );
+
+          
+            $client->messages->create($lead->phone, [
+                'from' => $fromNumber,
+                'body' => $body,
+            ]);
+
+            Message::create([
+                'lead_id' => $lead->id,
+                'text' => $body,
+                'out' => true,
+                'status' => 'sent',
+            ]);
+        }
+    }
+
+} catch (\Exception $e) {
+    \Log::error('Appointment SMS failed: ' . $e->getMessage());
+}
+
         try {
             $lead = $appointment->lead;
           $serviceType = $appointment->service_type ?? 'General Service';
@@ -88,7 +155,7 @@ class AppointmentController extends Controller
             \Log::error('❌ Failed n8n webhook: ' . $e->getMessage());
         }
 
-        // ✅ Google Calendar Sync Job
+
         try {
             \Log::info('Dispatching SyncAppointmentToGoogle job', [
                 'appointment_id' => $appointment->id,

@@ -51,6 +51,11 @@ public function reminders()
 {
     return $this->hasMany(Reminder::class);
 }
+public function customAnswers()
+{
+    return $this->hasMany(LeadCustomAnswer::class);
+}
+
 
 
 }

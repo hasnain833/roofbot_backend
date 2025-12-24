@@ -11,6 +11,7 @@ class TenantSmsTemplate extends Model
 
     protected $fillable = [
         'tenant_id',
+        'type',
         'message',
     ];
 

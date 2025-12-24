@@ -21,4 +21,8 @@ class Reminder extends Model
     {
         return $this->belongsTo(Lead::class);
     }
+        public function appointment()
+    {
+        return $this->belongsTo(Appointment::class);
+    }
 }
