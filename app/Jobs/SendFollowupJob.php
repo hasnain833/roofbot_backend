@@ -30,7 +30,7 @@ class SendFollowupJob implements ShouldQueue
     public function handle()
     {
         $lead = $this->followup->lead;
-        $tenantId = $lead->tenant_id;// Set tenant context
+        $tenantId = $lead->tenant_id;
 
         $tenantAgent = TenantAgent::where('tenant_id', $lead->tenant_id)->first();
 
@@ -44,7 +44,7 @@ class SendFollowupJob implements ShouldQueue
                 $client = new Client($twilioIntegration->key, $twilioIntegration->secret);
                 $numbers = $client->incomingPhoneNumbers->read();
                 $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
-                $body = "Followup for {$lead->first_name}: Status is {$lead->status}. {$this->followup->note}"; // Customize
+                $body = "Followup for {$lead->first_name}: Status is {$lead->status}. {$this->followup->note}";
 
                 $client->messages->create($lead->phone, [
                     'from' => $fromNumber,
@@ -68,7 +68,7 @@ class SendFollowupJob implements ShouldQueue
                 $email->setFrom(env('MAIL_FROM_ADDRESS', 'no-reply@example.com'), env('MAIL_FROM_NAME', $lead->tenant->company));
                 $email->setSubject("Followup Reminder: Lead Status {$lead->status}");
                 $email->addTo($lead->email, "{$lead->first_name} {$lead->last_name}");
-                $email->addContent("text/plain", "Hi {$lead->first_name}, followup for your lead (status: {$lead->status}). {$this->followup->note}"); // Customize
+                $email->addContent("text/plain", "Hi {$lead->first_name}, followup for your lead (status: {$lead->status}). {$this->followup->note}"); 
 
                 $sendgrid = new SendGrid($sendgridIntegration->key ?? env('SENDGRID_API_KEY'));
                 $sendgrid->send($email);

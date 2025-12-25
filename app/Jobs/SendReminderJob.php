@@ -69,7 +69,7 @@ class SendReminderJob implements ShouldQueue
                 $email->setFrom(env('MAIL_FROM_ADDRESS', 'no-reply@example.com'), env('MAIL_FROM_NAME', $appointment->tenant->company));
                 $email->setSubject("Appointment Reminder: 24 Hours Away");
                 $email->addTo($lead->email, "{$lead->first_name} {$lead->last_name}");
-                $email->addContent("text/plain", "Hi {$lead->first_name}, your appointment is in 24 hours on {$appointment->start_time}. Title: {$appointment->title}."); // Customize
+                $email->addContent("text/plain", "Hi {$lead->first_name},This is a friendly reminder that your appointment is in 24 hours on {$appointment->start_time}. Title: {$appointment->title}."); 
 
                 $sendgrid = new SendGrid($sendgridIntegration->key ?? env('SENDGRID_API_KEY'));
                 $sendgrid->send($email);

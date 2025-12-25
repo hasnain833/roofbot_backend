@@ -23,7 +23,7 @@ class LeadController extends Controller
         if (!$tenant) {
             return response()->json(['error' => 'Tenant not found'], 400);
         }
-
+$pageSize = (int) $request->query('pageSize', 10);
         $query = Lead::where('tenant_id', $tenant->id)->with('serviceType');
 
         if ($search = $request->query('search')) {
@@ -35,7 +35,8 @@ class LeadController extends Controller
             });
         }
 
-        $leads = $query->orderBy('id', 'desc')->get();
+         $leads = $query->orderBy('id', 'desc')
+        ->paginate($pageSize);
 
         $leadData = $leads->map(function ($lead) {
             return [
@@ -53,7 +54,7 @@ class LeadController extends Controller
                 'service_type' => optional($lead->serviceType)->name ?? 'Unspecified',
             ];
         });
-        return response()->json(['data' => $leadData]);
+        return response()->json($leads);
     }
 
     public function store(Request $request)
@@ -213,6 +214,31 @@ Service Type: {$serviceType}";
             ], 500);
         }
     }
+
+
+public function customAnswers($leadId)
+{
+    $tenant = Helper::tenant();
+
+    if (!$tenant) {
+        return response()->json(['error' => 'Tenant not found'], 404);
+    }
+
+    $lead = Lead::where('id', $leadId)
+        ->where('tenant_id', $tenant->id) 
+        ->with('customAnswers')
+        ->firstOrFail();
+
+    return response()->json([
+        'data' => $lead->customAnswers->map(function ($a) {
+            return [
+                'id' => $a->id,
+                'question' => $a->question,
+                'answer' => $a->answer,
+            ];
+        }),
+    ]);
+}
 
 
     public function update(Request $request, Lead $lead)

@@ -18,7 +18,6 @@ class LoginResource extends JsonResource
     $user = $this->resource['user'];
     $subscription = $this->resource['subscription'] ?? null;
 
-    // PLAN ID NIKALO
     $planId = null;
     if ($subscription && $subscription->stripe_price) {
         $plan = Plan::where('stripe_monthly_price_id', $subscription->stripe_price)

@@ -29,6 +29,10 @@ class LeadAgent extends Agent
     protected ?string $tenantPrompt = null;
     protected array $customQuestions = [];
     protected array $serviceTypes = [];
+    protected ?string $currentLeadId = null;
+    protected bool $leadCreated = false;
+    protected int $customAnsweredCount = 0;
+
 
 
     public function __construct(?string $sessionId = null)
@@ -136,17 +140,31 @@ When you have ALL of the following:
 
 Call the create_lead tool with these exact values.you must not call before taking info.
 
+IMPORTANT MEMORY RULE:
+─────────────────────
+The value returned by create_lead tool
+IS the ONLY valid lead_id.
+Store it and reuse it for:
+• save_custom_answer
+• book_appointment
+
+If no lead_id exists:
+DO NOT call save_custom_answer
+DO NOT call book_appointment
 
 PHASE 3: ASK CUSTOM TENANT QUESTIONS
 ────────────────────────────────────
 {$customQuestionsText}
 After the lead is created:
 • Ask ALL tenant custom questions one by one
-• After user answers a question:
-  - Call save_custom_answer tool with:
-    • lead_id
-    • question
-    • answer
+After user answers a question:
+- You MUST use the EXACT lead_id returned by the create_lead tool
+- NEVER invent or guess lead_id
+- Call save_custom_answer tool with:
+  • lead_id = the string returned by create_lead
+  • question
+  • answer
+
 • Do NOT repeat already answered questions
 • Do NOT ask appointment date until all custom questions are answered
 
@@ -290,6 +308,10 @@ PROMPT;
             ) {
                 return "Error: Missing required information. Please provide all fields.";
             }
+            if ($this->leadCreated && $this->currentLeadId) {
+                return $this->currentLeadId;
+            }
+
             $serviceNames = collect($this->serviceTypes)->pluck('name')->toArray();
             $service_type_name = $this->closestMatch($service_type_name, $serviceNames);
 
@@ -338,7 +360,7 @@ PROMPT;
                         $body = $template ? $template->message : "Hello {first_name}, thank you for showing interest in {service_type} services.";
 
                         $body = str_replace('{first_name}', $lead->first_name, $body);
-                         $body = str_replace('{service_type}', optional($lead->serviceType)->name ?? ' services', $body);
+                        $body = str_replace('{service_type}', optional($lead->serviceType)->name ?? ' services', $body);
 
 
 
@@ -366,52 +388,76 @@ PROMPT;
                 }
             }
 
+
             Log::info('Lead created via chatbot', [
                 'lead_id' => $lead->id,
                 'tenant_id' => $this->tenantId,
                 'name' => "{$first_name} {$last_name}",
                 'phone' => $phone
             ]);
+            $this->leadCreated = true;
+            $this->currentLeadId = (string) $lead->id;
 
-            return (string) $lead->id;
+            return $this->currentLeadId;
+
+
 
         } catch (\Exception $e) {
             Log::error('Lead creation failed', [
                 'error' => $e->getMessage(),
                 'tenant_id' => $this->tenantId
             ]);
+
             return "Error creating lead: " . $e->getMessage();
         }
+
+
     }
 
-#[Tool(description: 'Save answer to a custom tenant question for a lead')]
-public function save_custom_answer(
-    string $lead_id,
-    string $question,
-    string $answer
-): string {
-    try {
-        \App\Models\LeadCustomAnswer::updateOrCreate(
-            [
-                'lead_id' => $lead_id,
-                'question' => $question,
-            ],
-            [
-                'tenant_id' => $this->tenantId,
-                'answer' => $answer,
-            ]
-        );
+    #[Tool(description: 'Save answer to a custom tenant question for a lead')]
+    public function save_custom_answer(
+        string $lead_id,
+        string $question,
+        string $answer
+    ): string {
+      $leadId = (int) $lead_id;
 
-        return 'saved';
-    } catch (\Exception $e) {
-        Log::error('Custom answer save failed', [
-            'error' => $e->getMessage(),
-            'tenant_id' => $this->tenantId,
-        ]);
-
-        return 'error';
-    }
+if ($leadId <= 0) {
+    Log::warning('Invalid lead_id passed to save_custom_answer', [
+        'lead_id' => $lead_id,
+        'tenant_id' => $this->tenantId,
+    ]);
+    return 'invalid_lead_id';
 }
+
+
+        try {
+            \App\Models\LeadCustomAnswer::updateOrCreate(
+
+                [
+                    'lead_id' => $leadId,
+
+                    'question' => $question,
+                ],
+                [
+                    'tenant_id' => $this->tenantId,
+                    'answer' => $answer,
+                ]
+            );
+            $this->customAnsweredCount++;
+
+            return 'saved';
+
+
+        } catch (\Exception $e) {
+            Log::error('Custom answer save failed', [
+                'error' => $e->getMessage(),
+                'tenant_id' => $this->tenantId,
+            ]);
+
+            return 'error';
+        }
+    }
 
 
     #[Tool(description: 'Book an appointment for a lead. Call this ONLY after the lead is created and you have appointment date/time. Requires lead_id, title, service_type, start_time (ISO 8601), and end_time (ISO 8601).')]
