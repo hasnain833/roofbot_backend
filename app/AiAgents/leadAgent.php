@@ -10,6 +10,8 @@ use App\Jobs\SyncAppointmentToGoogle;
 use App\Jobs\SyncAppointmentToOutlook;
 use Illuminate\Support\Facades\Log;
 use Twilio\Rest\Client;
+use SendGrid\Mail\Mail;
+use SendGrid;
 use App\Models\Reminder;
 use Carbon\Carbon;
 
@@ -530,6 +532,64 @@ if ($leadId <= 0) {
                     ]);
                 }
             }
+            if ($lead->email && $tenantAgent) {
+            $sendgridIntegration = \App\Models\TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
+                ->where('provider', 'sendgrid')
+                ->first();
+
+            if ($sendgridIntegration) {
+                try {
+                    $template = \App\Models\TenantEmailTemplate::where('tenant_id', $this->tenantId)
+                        ->where('type', 'appointment')
+                        ->first();
+
+                    $defaultSubject = 'Your Appointment is Confirmed';
+                    $defaultBody = "Hi {first_name},\n\nYour appointment for {service_type} is scheduled on {date_time}. See you soon!";
+
+                    $subject = $template?->subject ?? $defaultSubject;
+                    $body = $template?->message ?? $defaultBody;
+
+                    $body = str_replace('{first_name}', $lead->first_name, $body);
+                    $body = str_replace('{service_type}', $service_type ?? 'our services', $body);
+                    $body = str_replace('{date_time}', Carbon::parse($start_time)->format('M d, Y h:i A'), $body);
+
+                    $fromEmail = $sendgridIntegration->from_email ?? 'no-reply@yourcrm.com'; 
+
+                    $email = new Mail();
+                    $email->setFrom($fromEmail, $tenantAgent->tenant->company ?? 'Your Company');
+                    $email->setSubject($subject);
+
+                    $fullName = trim($lead->first_name . ' ' . ($lead->last_name ?? ''));
+                    $email->addTo($lead->email, $fullName);
+                    $email->addContent("text/plain", $body);
+
+                    $sendgrid = new SendGrid($sendgridIntegration->key);
+                    $response = $sendgrid->send($email);
+
+                    $statusCode = $response?->statusCode();
+
+                    if ($statusCode === 202) {
+                        Log::info('Chatbot appointment email sent successfully', [
+                            'appointment_id' => $appointment->id,
+                            'to' => $lead->email,
+                            'from' => $fromEmail,
+                        ]);
+                    } else {
+                        Log::warning('Chatbot appointment email failed (non-202)', [
+                            'appointment_id' => $appointment->id,
+                            'status_code' => $statusCode,
+                            'response' => $response?->body(),
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    Log::error('Chatbot appointment email failed: ' . $e->getMessage(), [
+                        'appointment_id' => $appointment->id,
+                        'to' => $lead->email ?? 'unknown',
+                    ]);
+                }
+            }
+        }
+            
 
             try {
                 dispatch(new SyncAppointmentToGoogle($appointment));

@@ -30,8 +30,6 @@ class SendFollowupJob implements ShouldQueue
     public function handle()
     {
         $lead = $this->followup->lead;
-        $tenantId = $lead->tenant_id;
-
         $tenantAgent = TenantAgent::where('tenant_id', $lead->tenant_id)->first();
 
         // SMS via Twilio
@@ -44,7 +42,18 @@ class SendFollowupJob implements ShouldQueue
                 $client = new Client($twilioIntegration->key, $twilioIntegration->secret);
                 $numbers = $client->incomingPhoneNumbers->read();
                 $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
-                $body = "Followup for {$lead->first_name}: Status is {$lead->status}. {$this->followup->note}";
+
+                $template = \App\Models\TenantSmsTemplate::where('tenant_id', $lead->tenant_id)
+                    ->where('type', 'followup')
+                    ->first();
+
+                $defaultBody = "Hi {first_name},We are following up on your interest in our services";
+
+                $body = $template ? $template->message : $defaultBody;
+
+                $body = str_replace('{first_name}', $lead->first_name, $body);
+                $body = str_replace('{status}', $lead->status, $body);
+                $body = str_replace('{note}', $this->followup->note ?? '', $body);
 
                 $client->messages->create($lead->phone, [
                     'from' => $fromNumber,
@@ -64,11 +73,32 @@ class SendFollowupJob implements ShouldQueue
 
         if ($sendgridIntegration && $lead->email) {
             try {
+                $template = \App\Models\TenantEmailTemplate::where('tenant_id', $lead->tenant_id)
+                    ->where('type', 'followup')
+                    ->first();
+
+                $defaultSubject = "Follow-up";
+                $defaultBody = "Hi {first_name}, we are following up on your interest in our services.";
+
+                $subject = $template ? $template->subject : $defaultSubject;
+                $body = $template ? $template->message : $defaultBody;
+
+                $subject = str_replace('{status}', $lead->status, $subject);
+                $body = str_replace('{first_name}', $lead->first_name, $body);
+                $body = str_replace('{status}', $lead->status, $body);
+                $body = str_replace('{note}', $this->followup->note ?? '', $body);
+
                 $email = new Mail();
-                $email->setFrom(env('MAIL_FROM_ADDRESS', 'no-reply@example.com'), env('MAIL_FROM_NAME', $lead->tenant->company));
-                $email->setSubject("Followup Reminder: Lead Status {$lead->status}");
-                $email->addTo($lead->email, "{$lead->first_name} {$lead->last_name}");
-                $email->addContent("text/plain", "Hi {$lead->first_name}, followup for your lead (status: {$lead->status}). {$this->followup->note}"); 
+                $fromEmail = $sendgridIntegration->from_email
+                    ?? 'no-reply@yourdefault.com';
+
+                $email->setFrom(
+                    $fromEmail,
+                    $tenant->company ?? 'Your Company'
+                );
+                $email->setSubject($subject);
+                $email->addTo($lead->email, $lead->first_name . ' ' . ($lead->last_name ?? ''));
+                $email->addContent("text/plain", $body);
 
                 $sendgrid = new SendGrid($sendgridIntegration->key ?? env('SENDGRID_API_KEY'));
                 $sendgrid->send($email);

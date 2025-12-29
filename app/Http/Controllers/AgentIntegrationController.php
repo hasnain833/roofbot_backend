@@ -383,6 +383,7 @@ public function updateSendgrid(Request $request)
 
     $request->validate([
         'key' => 'required|string',
+        'from_email' => 'required|email',
     ]);
 
     // Optional: Test the API key (recommended)
@@ -409,7 +410,8 @@ public function updateSendgrid(Request $request)
         ],
         [
             'key' => $request->key,
-            'secret' => '', // Not needed
+            'secret' => '',
+            'from_email' => $request->from_email,
             'meta' => json_encode(['note' => 'SendGrid API key']),
         ]
     );

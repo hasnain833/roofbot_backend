@@ -15,6 +15,9 @@ use Twilio\Rest\Client;
 use App\Models\TenantSmsTemplate;
 use App\Models\TenantAgent;
 use App\Models\Message;
+use App\Models\TenantEmailTemplate;
+use SendGrid\Mail\Mail;
+use SendGrid;
 
 class AppointmentController extends Controller
 {
@@ -50,125 +53,118 @@ class AppointmentController extends Controller
 
         $appointment = Appointment::create($validated);
         $this->createReminder($appointment);
-       
-try {
-    $lead = $appointment->lead;
 
-    if ($lead && $lead->phone) {
+        // === Load lead and tenant agent ONCE, outside try blocks ===
+        $lead = $appointment->lead; // May be null if no lead_id
+        $tenant = Helper::tenant();
+        $tenantAgent = TenantAgent::where('tenant_id', $tenant->id)->first();
 
-        $tenantAgent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
-
-        $twilioIntegration = TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
-            ->where('provider', 'twilio')
-            ->first();
-
-        if ($twilioIntegration) {
-
-            $client = new Client(
-                $twilioIntegration->key,
-                $twilioIntegration->secret
-            );
-
-            $numbers = $client->incomingPhoneNumbers->read();
-            $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
-
-       
-            $template = TenantSmsTemplate::where('tenant_id', Helper::tenant()->id)
-                ->where('type', 'appointment')
-                ->first();
-
-            $defaultBody =
-                "Hi {first_name}, your appointment for {service_type} is scheduled on {date_time}. See you soon!";
-
-            $body = $template ? $template->message : $defaultBody;
-
-       
-            $body = str_replace('{first_name}', $lead->first_name, $body);
-            $body = str_replace(
-                '{service_type}',
-                $appointment->service_type ?? 'our services',
-                $body
-            );
-            $body = str_replace(
-                '{date_time}',
-                Carbon::parse($appointment->start_time)->format('M d, Y h:i A'),
-                $body
-            );
-
-          
-            $client->messages->create($lead->phone, [
-                'from' => $fromNumber,
-                'body' => $body,
-            ]);
-
-            Message::create([
-                'lead_id' => $lead->id,
-                'text' => $body,
-                'out' => true,
-                'status' => 'sent',
-            ]);
-        }
-    }
-
-} catch (\Exception $e) {
-    \Log::error('Appointment SMS failed: ' . $e->getMessage());
-}
-
-        try {
-            $lead = $appointment->lead;
-          $serviceType = $appointment->service_type ?? 'General Service';
-
-
-            $tenantAgent = \App\Models\TenantAgent::where('tenant_id', $appointment->tenant_id)->first();
-            if (!$tenantAgent) {
-                throw new \Exception('TenantAgent not found for tenant ID: ' . $appointment->tenant_id);
-            }
-
-            $googleIntegration = TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
-                ->where('provider', 'google')
-                ->first();
-
-            $twilioIntegration = TenantAgentIntegration::where('tenant_agent_id', $appointment->user_id)
+        // ================== SEND SMS ==================
+        if ($lead && $lead->phone && $tenantAgent) {
+            $twilioIntegration = TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
                 ->where('provider', 'twilio')
                 ->first();
 
-            $payload = [
-                'event' => 'appointment_created',
-                'fullName' => $lead ? trim($lead->first_name . ' ' . ($lead->last_name ?? '')) : null,
-                'userPhone' => $lead->phone ?? null,
-                'email' => $lead->email ?? null,
-                'serviceNeeded' => $serviceType ?? 'General Service',
-                'preferredDateTimeISO' => Carbon::parse($appointment->start_time)->toIso8601String(),
-                'windowEndISO' => Carbon::parse($appointment->end_time)->toIso8601String(),
-                'tenant_id' => $appointment->tenant_id,
-                'appointment_id' => $appointment->id,
-                'google_access_token' => $googleIntegration?->key,
-                'twilio_sid' => $twilioIntegration?->key,
-                'twilio_token' => $twilioIntegration?->secret,
-            ];
+            if ($twilioIntegration) {
+                try {
+                    $client = new Client($twilioIntegration->key, $twilioIntegration->secret);
+                    $numbers = $client->incomingPhoneNumbers->read();
+                    $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
 
-            Http::withHeaders([
-                'Accept' => 'application/json',
-            ])->post(env('N8N_WEBHOOK_URL'), $payload);
+                    $template = TenantSmsTemplate::where('tenant_id', $tenant->id)
+                        ->where('type', 'appointment')
+                        ->first();
 
-        } catch (\Exception $e) {
-            \Log::error('❌ Failed n8n webhook: ' . $e->getMessage());
+                    $defaultBody = "Hi {first_name}, your appointment for {service_type} is scheduled on {date_time}. See you soon!";
+                    $body = $template?->message ?? $defaultBody;
+
+                    $body = str_replace('{first_name}', $lead->first_name, $body);
+                    $body = str_replace('{service_type}', $appointment->service_type ?? 'our services', $body);
+                    $body = str_replace('{date_time}', Carbon::parse($appointment->start_time)->format('M d, Y h:i A'), $body);
+
+                    $client->messages->create($lead->phone, [
+                        'from' => $fromNumber,
+                        'body' => $body,
+                    ]);
+
+                    Message::create([
+                        'lead_id' => $lead->id,
+                        'text' => $body,
+                        'out' => true,
+                        'status' => 'sent',
+                    ]);
+
+                    \Log::info('Appointment SMS sent', ['appointment_id' => $appointment->id]);
+                } catch (\Exception $e) {
+                    \Log::error('Appointment SMS failed: ' . $e->getMessage());
+                }
+            }
         }
 
+        // ================== SEND EMAIL ==================
+        if ($lead && $lead->email && $tenantAgent) {
+            $sendgridIntegration = TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
+                ->where('provider', 'sendgrid')
+                ->first();
 
+            if ($sendgridIntegration) {
+                try {
+                    $template = TenantEmailTemplate::where('tenant_id', $tenant->id)
+                        ->where('type', 'appointment')
+                        ->first();
+
+                    $defaultSubject = 'Your Appointment is Confirmed';
+                    $defaultBody = "Hi {first_name},\n\nYour appointment for {service_type} is scheduled on {date_time}. See you soon!";
+
+                    $subject = $template?->subject ?? $defaultSubject;
+                    $body = $template?->message ?? $defaultBody;
+
+                    $body = str_replace('{first_name}', $lead->first_name, $body);
+                    $body = str_replace('{service_type}', $appointment->service_type ?? 'our services', $body);
+                    $body = str_replace('{date_time}', Carbon::parse($appointment->start_time)->format('M d, Y h:i A'), $body);
+
+                    $email = new Mail();
+
+                    $fromEmail = $sendgridIntegration->from_email
+                        ?? 'no-reply@yourdefault.com'; 
+
+                    $email->setFrom(
+                        $fromEmail,
+                        $tenant->company ?? 'Your Company'
+                    );
+                    $email->setSubject($subject);
+
+                    $fullName = trim($lead->first_name . ' ' . ($lead->last_name ?? ''));
+                    $email->addTo($lead->email, $fullName);
+                    $email->addContent("text/plain", $body);
+
+                    $sendgrid = new SendGrid($sendgridIntegration->key);
+                    $response = $sendgrid->send($email);
+
+                    \Log::info('Appointment email sent', [
+                        'appointment_id' => $appointment->id,
+                        'to' => $lead->email,
+                        'status_code' => $response?->statusCode()
+
+                    ]);
+                } catch (\Exception $e) {
+                    \Log::error('Appointment email failed: ' . $e->getMessage(), [
+                        'appointment_id' => $appointment->id,
+                        'to' => $lead->email ?? 'unknown'
+                    ]);
+                }
+
+            } else {
+                \Log::warning('SendGrid integration not found for tenant', ['tenant_id' => $tenant->id]);
+            }
+        }
+        // ================== Sync Jobs ==================
         try {
-            \Log::info('Dispatching SyncAppointmentToGoogle job', [
-                'appointment_id' => $appointment->id,
-                'tenant_id' => $appointment->tenant_id,
-            ]);
             dispatch(new SyncAppointmentToGoogle($appointment));
             dispatch(new SyncAppointmentToOutlook($appointment));
-
-            \Log::info('SyncAppointmentToGoogle job dispatched successfully', [
-                'appointment_id' => $appointment->id,
-            ]);
+            \Log::info('Sync jobs dispatched', ['appointment_id' => $appointment->id]);
         } catch (\Exception $e) {
-            \Log::error('❌ Failed Google Sync Job: ' . $e->getMessage());
+            \Log::error('Failed to dispatch sync jobs: ' . $e->getMessage());
         }
 
         return response()->json([
@@ -179,7 +175,7 @@ try {
     }
     private function createReminder(Appointment $appointment)
     {
-        $appointment->reminders()->delete(); 
+        $appointment->reminders()->delete();
 
         \App\Models\Reminder::create([
             'lead_id' => $appointment->lead_id,
@@ -218,7 +214,7 @@ try {
             return response()->json(['error' => 'Job already exists'], 400);
         }
 
-      $serviceTypeName = $appointment->service_type ?? 'General Service';
+        $serviceTypeName = $appointment->service_type ?? 'General Service';
 
         \Log::info('ServiceType', ['serviceType' => $appointment->serviceType]);
 
@@ -306,10 +302,10 @@ try {
         $validated['user_id'] = null;
 
         $appointment = Appointment::create($validated);
-       
+
         try {
             $lead = $appointment->lead;
-           $serviceType = $appointment->service_type ?? 'General Service';
+            $serviceType = $appointment->service_type ?? 'General Service';
 
             $tenantAgent = \App\Models\TenantAgent::where('tenant_id', $appointment->tenant_id)->first();
             if (!$tenantAgent) {

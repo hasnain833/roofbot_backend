@@ -18,7 +18,8 @@ use App\Http\Controllers\BillingController;
 use App\Http\Controllers\TenantSmsTemplateController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\ServiceTypeController;
-use App\AiAgents\leedAgent;
+use App\Http\Controllers\TenantEmailTemplateController;
+use App\AiAgents\leadAgent;
 use App\Helper;
 use App\Http\Controllers\StripeWebhookController;
 use Laravel\Cashier\Http\Controllers\WebhookController;
@@ -83,6 +84,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/tenant/sms-template', [TenantSmsTemplateController::class, 'getTemplate']);
     Route::post('/tenant/sms-template', [TenantSmsTemplateController::class, 'storeOrUpdate']);
+    Route::get('/tenant/email-template', [TenantEmailTemplateController::class, 'getTemplate']);
+Route::post('/tenant/email-template', [TenantEmailTemplateController::class, 'storeOrUpdate']);
 });
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/lead/summarize-chat', [TwilioController::class, 'summarizeChat']);

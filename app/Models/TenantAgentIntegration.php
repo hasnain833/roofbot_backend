@@ -11,7 +11,8 @@ class TenantAgentIntegration extends Model
         'provider',
         'key',
         'secret',
-        'meta'
+        'meta',
+        'from_email',
     ];
 
     public function agent()
