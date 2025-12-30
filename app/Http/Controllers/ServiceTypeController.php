@@ -8,7 +8,7 @@ use Illuminate\Http\Request;
 
 class ServiceTypeController extends Controller
 {
-    // ✅ LIST
+   
     public function index()
     {
         $tenant = Helper::tenant();
@@ -23,7 +23,6 @@ class ServiceTypeController extends Controller
         return response()->json(['data' => $types]);
     }
 
-    // ✅ CREATE
     public function store(Request $request)
     {
         $validated = $request->validate([
@@ -36,7 +35,6 @@ class ServiceTypeController extends Controller
             return response()->json(['error' => 'Tenant not found'], 400);
         }
 
-        // Prevent duplicate names per tenant
         $exists = ServiceType::where('tenant_id', $tenant->id)
             ->where('name', $validated['name'])
             ->exists();
@@ -58,14 +56,14 @@ class ServiceTypeController extends Controller
         ]);
     }
 
-    // ✅ SHOW
+  
     public function show(ServiceType $serviceType)
     {
         $this->authorizeTenant($serviceType);
         return response()->json(['data' => $serviceType]);
     }
 
-    // ✅ UPDATE
+  
     public function update(Request $request, ServiceType $serviceType)
     {
         $this->authorizeTenant($serviceType);
@@ -95,7 +93,7 @@ class ServiceTypeController extends Controller
         ]);
     }
 
-    // 🔐 TENANT AUTH
+
     private function authorizeTenant(ServiceType $serviceType)
     {
         $tenant = Helper::tenant();

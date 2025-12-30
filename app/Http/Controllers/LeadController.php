@@ -106,17 +106,22 @@ $pageSize = (int) $request->query('pageSize', 10);
                     $body = str_replace('{first_name}', $lead->first_name, $body);
                     $body = str_replace('{service_type}', optional($lead->serviceType)->name ?? ' services', $body);
 
-                    $client->messages->create($lead->phone, [
-                        'from' => $fromNumber,
-                        'body' => $body,
-                    ]);
+                    $statusCallbackUrl = env('APP_URL') . '/api/twilio/status';
 
-                    \App\Models\Message::create([
-                        'lead_id' => $lead->id,
-                        'text' => $body,
-                        'out' => true,
-                        'status' => 'sent',
-                    ]);
+                   $twilioMessage = $client->messages->create($lead->phone, [
+                'from' => $fromNumber,
+                'body' => $body,
+                'statusCallback' => $statusCallbackUrl,        
+                'statusCallbackMethod' => 'POST',
+            ]);
+
+                   \App\Models\Message::create([
+                'lead_id' => $lead->id,
+                'text' => $body,
+                'out' => true,
+                'status' => $twilioMessage->status,   
+                'sid' => $twilioMessage->sid,       
+            ]);
 
                 } catch (\Exception $e) {
                     Log::error("Twilio send failed: " . $e->getMessage());

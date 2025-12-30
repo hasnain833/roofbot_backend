@@ -362,22 +362,23 @@ PROMPT;
                         $body = $template ? $template->message : "Hello {first_name}, thank you for showing interest in {service_type} services.";
 
                         $body = str_replace('{first_name}', $lead->first_name, $body);
-                        $body = str_replace('{service_type}', optional($lead->serviceType)->name ?? ' services', $body);
+                       $body = str_replace('{service_type}', $lead->service_type_name ?? 'our services', $body);
 
 
+                       $statusCallbackUrl = env('APP_URL') . '/api/twilio/status';
 
-
-                        $client->messages->create($lead->phone, [
-                            'from' => $fromNumber,
-                            'body' => $body,
-                        ]);
-
-                        \App\Models\Message::create([
-                            'lead_id' => $lead->id,
-                            'text' => $body,
-                            'out' => true,
-                            'status' => 'sent',
-                        ]);
+                        $twilioMessage = $client->messages->create($lead->phone, [
+                'from' => $fromNumber,
+                'body' => $body,
+                'statusCallback' => $statusCallbackUrl,
+            ]);
+                      \App\Models\Message::create([
+                'lead_id' => $lead->id,
+                'text' => $body,
+                'out' => true,
+                'status' => $twilioMessage->status,
+                'sid' => $twilioMessage->sid,
+            ]);
 
                     } catch (\Exception $e) {
                         Log::error("Twilio send failed: " . $e->getMessage());
