@@ -86,8 +86,8 @@ $integration->update([
             $eventData = [
                 'summary' => $appointment->title,
                 'description' => $appointment->description ?? '',
-                'start' => ['dateTime' => $appointment->start_time->toRfc3339String(), 'timeZone' => 'Asia/Karachi'],
-                'end' => ['dateTime' => $appointment->end_time->toRfc3339String(), 'timeZone' => 'Asia/Karachi'],
+                'start' => ['dateTime' => $appointment->start_time->toRfc3339String(), 'timeZone' => 'Europe/London'],
+                'end' => ['dateTime' => $appointment->end_time->toRfc3339String(), 'timeZone' => 'Europe/London'],
             ];
 
             if ($this->isUpdate && $appointment->google_event_id) {

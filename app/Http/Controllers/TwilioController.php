@@ -409,7 +409,7 @@ Highlight intent, questions, tone, and next steps:\n\n{$chatText}";
                 ->exists();
 
             if ($recentMissedSms) {
-                return response()->json(['success' => true]); // Already sent
+                return response()->json(['success' => true]); 
             }
 
             if ($lead) {

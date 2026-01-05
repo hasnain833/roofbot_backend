@@ -81,7 +81,7 @@ class BillingController extends Controller
             $isMonthly = !empty($plan->stripe_monthly_price_id);
             $priceId = $isMonthly ? $plan->stripe_monthly_price_id : $plan->stripe_yearly_price_id;
 
-            $trialDays = 14;
+            $trialDays = 30;
 
             $lineItems = [
                 [
@@ -92,8 +92,6 @@ class BillingController extends Controller
 
 
 
-
-            // Create checkout session (no setup fee here)
             $checkout = $user->checkout($lineItems, [
                 'success_url' => env('FRONTEND_URL') . '/signin?paid=1',
                 'cancel_url' => env('FRONTEND_URL') . '/signup?cancel=1',
@@ -139,7 +137,7 @@ class BillingController extends Controller
 
 
             $subscription = $user->newSubscription('default', $priceId)
-                ->trialDays(0)  
+                ->trialDays(30)  
                 ->create();
 
             $user->plan_id = $plan->id;

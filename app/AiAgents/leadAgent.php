@@ -286,6 +286,39 @@ PROMPT;
         }
         return $options[0] ?? 'General';
     }
+private function createFollowups(Lead $lead)
+{
+    $lead->followups()->delete();
+
+    $status = $lead->status ?? 'New';
+    if (!in_array($status, ['New', 'Contacted', 'Proposal Sent'])) {
+        return;
+    }
+
+    $followupDays = [1, 3, 5];
+
+    foreach ($followupDays as $attempt => $days) {
+        \App\Models\Followup::create([
+            'lead_id' => $lead->id,
+            'followup_date' => now()->addDays($days),
+            'note' => "Followup attempt " . ($attempt + 1) . " for status {$status}",
+            'type' => $status,
+            'done' => false,
+        ]);
+    }
+}
+private function createReminder(Appointment $appointment)
+{
+    $appointment->reminders()->delete();
+
+    Reminder::create([
+        'lead_id' => $appointment->lead_id,
+        'appointment_id' => $appointment->id,
+        'reminder_date' => Carbon::parse($appointment->start_time)->subHours(24),
+        'type' => 'appointment',
+        'done' => false,
+    ]);
+}
 
 
 
@@ -344,6 +377,9 @@ PROMPT;
                 'status' => $Status,
             ]);
 
+            $this->createFollowups($lead);
+
+
             if (!empty($lead->phone)) {
                 $tenant_agent = \App\Models\TenantAgent::where('tenant_id', $this->tenantId)->first();
                 $integration = \App\Models\TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->id)
@@ -390,6 +426,54 @@ PROMPT;
                     }
                 }
             }
+            // ================== SEND LEAD EMAIL ==================
+if (!empty($lead->email)) {
+    $tenant_agent = \App\Models\TenantAgent::where('tenant_id', $this->tenantId)->first();
+
+    $sendgridIntegration = \App\Models\TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->id)
+        ->where('provider', 'sendgrid')
+        ->first();
+
+    if ($sendgridIntegration) {
+        try {
+            $template = \App\Models\TenantEmailTemplate::where('tenant_id', $this->tenantId)
+                ->where('type', 'lead')
+                ->first();
+
+            $defaultSubject = 'Thanks for contacting us';
+            $defaultBody = "Hi {first_name},\n\nThank you for your interest in {service_type}. Our team will contact you shortly.";
+
+            $subject = $template?->subject ?? $defaultSubject;
+            $body = $template?->message ?? $defaultBody;
+
+            $body = str_replace('{first_name}', $lead->first_name, $body);
+            $body = str_replace('{service_type}', $lead->service_type_name ?? 'our services', $body);
+
+            $email = new Mail();
+
+            $fromEmail = $sendgridIntegration->from_email ?? 'no-reply@yourcompany.com';
+
+            $email->setFrom($fromEmail, 'Your Company');
+            $email->setSubject($subject);
+            $email->addTo($lead->email, trim($lead->first_name . ' ' . $lead->last_name));
+            $email->addContent("text/plain", $body);
+
+            $sendgrid = new SendGrid($sendgridIntegration->key);
+            $sendgrid->send($email);
+
+            \Log::info('Lead email sent via chatbot', [
+                'lead_id' => $lead->id,
+                'email' => $lead->email
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Chatbot lead email failed', [
+                'error' => $e->getMessage(),
+                'lead_id' => $lead->id
+            ]);
+        }
+    }
+}
+
 
 
             Log::info('Lead created via chatbot', [
@@ -488,7 +572,9 @@ if ($leadId <= 0) {
                 'start_time' => $start_time,
                 'end_time' => $end_time,
             ]);
-            $lead = \App\Models\Lead::find($lead_id);
+            $this->createReminder($appointment);
+
+            $lead = Lead::find($lead_id);
 
             if ($lead && $lead->phone) {
 

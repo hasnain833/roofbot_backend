@@ -13,6 +13,9 @@ use Twilio\Rest\Client;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use SendGrid;
+use SendGrid\Mail\Mail;
+
 
 
 class LeadController extends Controller
@@ -23,7 +26,7 @@ class LeadController extends Controller
         if (!$tenant) {
             return response()->json(['error' => 'Tenant not found'], 400);
         }
-$pageSize = (int) $request->query('pageSize', 10);
+        $pageSize = (int) $request->query('pageSize', 10);
         $query = Lead::where('tenant_id', $tenant->id)->with('serviceType');
 
         if ($search = $request->query('search')) {
@@ -35,8 +38,8 @@ $pageSize = (int) $request->query('pageSize', 10);
             });
         }
 
-         $leads = $query->orderBy('id', 'desc')
-        ->paginate($pageSize);
+        $leads = $query->orderBy('id', 'desc')
+            ->paginate($pageSize);
 
         $leadData = $leads->map(function ($lead) {
             return [
@@ -86,6 +89,7 @@ $pageSize = (int) $request->query('pageSize', 10);
         ]);
         $this->createFollowups($lead);
 
+
         if ($lead->phone) {
             $tenant_agent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
             $integration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->id)
@@ -108,20 +112,20 @@ $pageSize = (int) $request->query('pageSize', 10);
 
                     $statusCallbackUrl = env('APP_URL') . '/api/twilio/status';
 
-                   $twilioMessage = $client->messages->create($lead->phone, [
-                'from' => $fromNumber,
-                'body' => $body,
-                'statusCallback' => $statusCallbackUrl,        
-                'statusCallbackMethod' => 'POST',
-            ]);
+                    $twilioMessage = $client->messages->create($lead->phone, [
+                        'from' => $fromNumber,
+                        'body' => $body,
+                        'statusCallback' => $statusCallbackUrl,
+                        'statusCallbackMethod' => 'POST',
+                    ]);
 
-                   \App\Models\Message::create([
-                'lead_id' => $lead->id,
-                'text' => $body,
-                'out' => true,
-                'status' => $twilioMessage->status,   
-                'sid' => $twilioMessage->sid,       
-            ]);
+                    \App\Models\Message::create([
+                        'lead_id' => $lead->id,
+                        'text' => $body,
+                        'out' => true,
+                        'status' => $twilioMessage->status,
+                        'sid' => $twilioMessage->sid,
+                    ]);
 
                 } catch (\Exception $e) {
                     Log::error("Twilio send failed: " . $e->getMessage());
@@ -133,6 +137,57 @@ $pageSize = (int) $request->query('pageSize', 10);
                 }
             }
         }
+        // ================== SEND LEAD EMAIL ==================
+        if ($lead->email && $tenant_agent) {
+            $sendgridIntegration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->id)
+                ->where('provider', 'sendgrid')
+                ->first();
+
+            if ($sendgridIntegration) {
+                try {
+                    $template = \App\Models\TenantEmailTemplate::where('tenant_id', $tenant->id)
+                        ->where('type', 'lead')
+                        ->first();
+
+                    $defaultSubject = 'Thank You';
+                    $defaultBody = "Hi {first_name},\n\nThank you for your interest in our services";
+
+                    $subject = $template?->subject ?? $defaultSubject;
+                    $body = $template?->message ?? $defaultBody;
+
+                    $body = str_replace('{first_name}', $lead->first_name, $body);
+                    $body = str_replace(
+                        '{service_type}',
+                        optional($lead->serviceType)->name ?? 'our services',
+                        $body
+                    );
+
+                    $email = new Mail();
+
+                    $fromEmail = $sendgridIntegration->from_email ?? 'no-reply@yourcompany.com';
+
+                    $email->setFrom($fromEmail, $tenant->company ?? 'Your Company');
+                    $email->setSubject($subject);
+
+                    $fullName = trim($lead->first_name . ' ' . ($lead->last_name ?? ''));
+                    $email->addTo($lead->email, $fullName);
+                    $email->addContent("text/plain", $body);
+
+                    $sendgrid = new SendGrid($sendgridIntegration->key);
+                    $sendgrid->send($email);
+
+                    \Log::info('Lead email sent', [
+                        'lead_id' => $lead->id,
+                        'email' => $lead->email,
+                    ]);
+                } catch (\Exception $e) {
+                    \Log::error('Lead email failed: ' . $e->getMessage(), [
+                        'lead_id' => $lead->id,
+                    ]);
+                }
+            }
+        }
+
 
         return response()->json([
             'message' => 'Lead created successfully',
@@ -221,29 +276,29 @@ Service Type: {$serviceType}";
     }
 
 
-public function customAnswers($leadId)
-{
-    $tenant = Helper::tenant();
+    public function customAnswers($leadId)
+    {
+        $tenant = Helper::tenant();
 
-    if (!$tenant) {
-        return response()->json(['error' => 'Tenant not found'], 404);
+        if (!$tenant) {
+            return response()->json(['error' => 'Tenant not found'], 404);
+        }
+
+        $lead = Lead::where('id', $leadId)
+            ->where('tenant_id', $tenant->id)
+            ->with('customAnswers')
+            ->firstOrFail();
+
+        return response()->json([
+            'data' => $lead->customAnswers->map(function ($a) {
+                return [
+                    'id' => $a->id,
+                    'question' => $a->question,
+                    'answer' => $a->answer,
+                ];
+            }),
+        ]);
     }
-
-    $lead = Lead::where('id', $leadId)
-        ->where('tenant_id', $tenant->id) 
-        ->with('customAnswers')
-        ->firstOrFail();
-
-    return response()->json([
-        'data' => $lead->customAnswers->map(function ($a) {
-            return [
-                'id' => $a->id,
-                'question' => $a->question,
-                'answer' => $a->answer,
-            ];
-        }),
-    ]);
-}
 
 
     public function update(Request $request, Lead $lead)
@@ -288,7 +343,7 @@ public function customAnswers($leadId)
 
         $status = $lead->status ?? 'New';
         if (!in_array($status, ['New', 'Contacted', 'Proposal Sent'])) {
-            return; // No followups for other statuses
+            return;
         }
 
         $followupDays = [1, 3, 5];
