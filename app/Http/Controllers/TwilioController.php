@@ -57,6 +57,12 @@ class TwilioController extends Controller
                 'status' => $message->status,
                 'sid' => $message->sid,
             ]);
+            if ($request->lead_id && $request->boolean('human')) {
+                Lead::where('id', $request->lead_id)
+                    ->where('tenant_id', Helper::tenant()->id)
+                    ->update(['missed_call_active' => false]);
+
+            }
 
             return response()->json([
                 'sid' => $message->sid,

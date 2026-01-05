@@ -137,17 +137,6 @@ Route::middleware(['auth:sanctum'])->group(function () {
 Route::get('/chatbot/session-info-iframe', [ChatbotController::class, 'sessionInfoIframe']);
 Route::post('/chatbot/message-public', [ChatbotController::class, 'handleMessagePublic']);
 
-Route::middleware('auth:sanctum')->group(function () {
-
-
-    Route::get('/service-types', function () {
-        $types = \App\Models\ServiceType::all();
-        return response()->json([
-            'success' => true,
-            'data' => $types
-        ]);
-    });
-});
 
 
 Route::middleware(['auth:sanctum'])->group(function () {
@@ -238,12 +227,4 @@ Route::middleware(['auth:sanctum', 'subscription'])->group(function () {
     Route::get('/profile/update', [UserController::class, 'updateProfile']);
     Route::put('/profile/password/update', [UserController::class, 'updatePasswordProfile']);
 
-    // Service Types
-    Route::get('/service-types', function () {
-        $types = \App\Models\ServiceType::all();
-        return response()->json([
-            'success' => true,
-            'data' => $types
-        ]);
-    });
 });
