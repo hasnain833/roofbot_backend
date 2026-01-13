@@ -87,9 +87,17 @@ In the meantime, feel free to reach out via phone or email! 😊"
 
 
 
-    $response = $agent->handleMessage($request->message);
-
-    return response()->json(['reply' => $response]);
+    try {
+        $response = $agent->handleMessage($request->message);
+        return response()->json(['reply' => $response]);
+    } catch (\Exception $e) {
+        Log::error('Chatbot handleMessage failed: ' . $e->getMessage(), [
+            'trace' => $e->getTraceAsString(),
+            'tenant_id' => $tenant->id,
+            'agent_id' => $request->agent_id
+        ]);
+        return response()->json(['error' => 'Internal server error', 'message' => $e->getMessage()], 500);
+    }
     
 }
 public function handleMessagePublic(Request $request)

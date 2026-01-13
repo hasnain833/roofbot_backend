@@ -15,6 +15,7 @@ use Twilio\Rest\Client;
 use SendGrid;
 use SendGrid\Mail\Mail;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Http;
 
 class SendFollowupJob implements ShouldQueue
 {
@@ -31,6 +32,7 @@ class SendFollowupJob implements ShouldQueue
     {
         $lead = $this->followup->lead;
         $tenantAgent = TenantAgent::where('tenant_id', $lead->tenant_id)->first();
+        $tenant = $tenantAgent->tenant;
 
         // SMS via Twilio
         $twilioIntegration = TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
@@ -39,7 +41,8 @@ class SendFollowupJob implements ShouldQueue
 
         if ($twilioIntegration && $lead->phone) {
             try {
-                $client = new Client($twilioIntegration->key, $twilioIntegration->secret);
+                $guzzleClient = new \GuzzleHttp\Client(['verify' => false]);
+                $client = new Client($twilioIntegration->key, $twilioIntegration->secret, null, null, new \Twilio\Http\GuzzleClient($guzzleClient));
                 $numbers = $client->incomingPhoneNumbers->read();
                 $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
 
@@ -60,9 +63,20 @@ class SendFollowupJob implements ShouldQueue
                     'body' => $body,
                 ]);
 
-                Log::info('Followup SMS sent', ['lead_id' => $lead->id]);
+                Log::info('✅ FOLLOWUP SMS SENT', [
+                    'lead_id' => $lead->id,
+                    'phone' => $lead->phone,
+                    'followup_id' => $this->followup->id,
+                ]);
+
             } catch (\Exception $e) {
-                Log::error('Followup SMS failed: ' . $e->getMessage());
+                Log::error('❌ FOLLOWUP SMS FAILED', [
+                    'lead_id' => $lead->id,
+                    'phone' => $lead->phone,
+                    'followup_id' => $this->followup->id,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
             }
         }
 
@@ -88,24 +102,48 @@ class SendFollowupJob implements ShouldQueue
                 $body = str_replace('{status}', $lead->status, $body);
                 $body = str_replace('{note}', $this->followup->note ?? '', $body);
 
-                $email = new Mail();
                 $fromEmail = $sendgridIntegration->from_email
                     ?? 'no-reply@yourdefault.com';
+                $fullName = $lead->first_name . ' ' . ($lead->last_name ?? '');
 
-                $email->setFrom(
-                    $fromEmail,
-                    $tenant->company ?? 'Your Company'
-                );
-                $email->setSubject($subject);
-                $email->addTo($lead->email, $lead->first_name . ' ' . ($lead->last_name ?? ''));
-                $email->addContent("text/plain", $body);
+                $response = Http::withoutVerifying()
+                    ->withHeaders(['Authorization' => 'Bearer ' . ($sendgridIntegration->key ?? env('SENDGRID_API_KEY'))])
+                    ->post('https://api.sendgrid.com/v3/mail/send', [
+                        'personalizations' => [
+                            [
+                                'to' => [['email' => $lead->email, 'name' => $fullName]],
+                                'subject' => $subject,
+                            ]
+                        ],
+                        'from' => ['email' => $fromEmail, 'name' => $tenant->company ?? 'Your Company'],
+                        'content' => [
+                            ['type' => 'text/plain', 'value' => $body]
+                        ]
+                    ]);
 
-                $sendgrid = new SendGrid($sendgridIntegration->key ?? env('SENDGRID_API_KEY'));
-                $sendgrid->send($email);
-
-                Log::info('Followup email sent', ['lead_id' => $lead->id]);
+                if ($response->successful()) {
+                    Log::info('✅ FOLLOWUP EMAIL SENT', [
+                        'lead_id' => $lead->id,
+                        'email' => $lead->email,
+                        'followup_id' => $this->followup->id,
+                    ]);
+                } else {
+                    Log::error('❌ FOLLOWUP EMAIL FAILED - SendGrid API Error', [
+                        'lead_id' => $lead->id,
+                        'email' => $lead->email,
+                        'followup_id' => $this->followup->id,
+                        'status_code' => $response->status(),
+                        'error_body' => $response->body(),
+                    ]);
+                }
             } catch (\Exception $e) {
-                Log::error('Followup email failed: ' . $e->getMessage());
+                Log::error('❌ FOLLOWUP EMAIL FAILED - Exception', [
+                    'lead_id' => $lead->id,
+                    'email' => $lead->email,
+                    'followup_id' => $this->followup->id,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
             }
         }
 

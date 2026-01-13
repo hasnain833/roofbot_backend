@@ -16,6 +16,7 @@ use Twilio\Rest\Client;
 use SendGrid;
 use SendGrid\Mail\Mail;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Http;
 
 class SendReminderJob implements ShouldQueue
 {
@@ -33,6 +34,7 @@ class SendReminderJob implements ShouldQueue
     $appointment = $this->reminder->appointment;
     $lead = $appointment->lead;
     $tenantAgent = TenantAgent::where('tenant_id', $appointment->tenant_id)->first();
+    $tenant = $tenantAgent->tenant;
 
     // SMS via Twilio
     $twilioIntegration = TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
@@ -41,7 +43,8 @@ class SendReminderJob implements ShouldQueue
 
     if ($twilioIntegration && $lead->phone) {
         try {
-            $client = new Client($twilioIntegration->key, $twilioIntegration->secret);
+            $guzzleClient = new \GuzzleHttp\Client(['verify' => false]);
+            $client = new Client($twilioIntegration->key, $twilioIntegration->secret, null, null, new \Twilio\Http\GuzzleClient($guzzleClient));
             $numbers = $client->incomingPhoneNumbers->read();
             $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
 
@@ -62,9 +65,22 @@ class SendReminderJob implements ShouldQueue
                 'body' => $body,
             ]);
 
-            Log::info('Reminder SMS sent', ['appointment_id' => $appointment->id]);
+            Log::info('✅ REMINDER SMS SENT', [
+                'appointment_id' => $appointment->id,
+                'lead_id' => $lead->id,
+                'phone' => $lead->phone,
+                'reminder_id' => $this->reminder->id,
+            ]);
+
         } catch (\Exception $e) {
-            Log::error('Reminder SMS failed: ' . $e->getMessage());
+            Log::error('❌ REMINDER SMS FAILED', [
+                'appointment_id' => $appointment->id,
+                'lead_id' => $lead->id,
+                'phone' => $lead->phone,
+                'reminder_id' => $this->reminder->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
         }
     }
 
@@ -88,24 +104,50 @@ class SendReminderJob implements ShouldQueue
             $body = str_replace('{date_time}', Carbon::parse($appointment->start_time)->format('M d, Y h:i A'), $body);
             $body = str_replace('{appointment_title}', $appointment->title, $body);
 
-            $email = new Mail();
-            $fromEmail = $sendgridIntegration->from_email
-                        ?? 'no-reply@yourdefault.com'; 
+            $fromEmail = $sendgridIntegration->from_email ?? 'no-reply@yourdefault.com';
+            $fullName = $lead->first_name . ' ' . ($lead->last_name ?? '');
 
-                    $email->setFrom(
-                        $fromEmail,
-                        $tenant->company ?? 'Your Company'
-                    );
-            $email->setSubject($subject);
-            $email->addTo($lead->email, $lead->first_name . ' ' . ($lead->last_name ?? ''));
-            $email->addContent("text/plain", $body);
+            $response = Http::withoutVerifying()
+                ->withHeaders(['Authorization' => 'Bearer ' . ($sendgridIntegration->key ?? env('SENDGRID_API_KEY'))])
+                ->post('https://api.sendgrid.com/v3/mail/send', [
+                    'personalizations' => [
+                        [
+                            'to' => [['email' => $lead->email, 'name' => $fullName]],
+                            'subject' => $subject,
+                        ]
+                    ],
+                    'from' => ['email' => $fromEmail, 'name' => $tenant->company ?? 'Your Company'],
+                    'content' => [
+                        ['type' => 'text/plain', 'value' => $body]
+                    ]
+                ]);
 
-            $sendgrid = new SendGrid($sendgridIntegration->key ?? env('SENDGRID_API_KEY'));
-            $sendgrid->send($email);
-
-            Log::info('Reminder email sent', ['appointment_id' => $appointment->id]);
+            if ($response->successful()) {
+                Log::info('✅ REMINDER EMAIL SENT', [
+                    'appointment_id' => $appointment->id,
+                    'lead_id' => $lead->id,
+                    'email' => $lead->email,
+                    'reminder_id' => $this->reminder->id,
+                ]);
+            } else {
+                Log::error('❌ REMINDER EMAIL FAILED - SendGrid API Error', [
+                    'appointment_id' => $appointment->id,
+                    'lead_id' => $lead->id,
+                    'email' => $lead->email,
+                    'reminder_id' => $this->reminder->id,
+                    'status_code' => $response->status(),
+                    'error_body' => $response->body(),
+                ]);
+            }
         } catch (\Exception $e) {
-            Log::error('Reminder email failed: ' . $e->getMessage());
+            Log::error('❌ REMINDER EMAIL FAILED - Exception', [
+                'appointment_id' => $appointment->id,
+                'lead_id' => $lead->id,
+                'email' => $lead->email,
+                'reminder_id' => $this->reminder->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
         }
     }
 

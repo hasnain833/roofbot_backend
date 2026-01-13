@@ -28,7 +28,6 @@ use Laravel\Cashier\Http\Controllers\WebhookController;
 
 Route::post('/auth/login', [LoginController::class, 'store']);
 Route::post('/auth/signup', [RegisteredUserController::class, 'store']);
-
 Route::post('/public/leads', [LeadController::class, 'publicStore']);
 Route::post('/public/appointments', [AppointmentController::class, 'publicStore']);
 Route::put('/public/leads/{id}', [LeadController::class, 'publicUpdate']);
@@ -46,18 +45,15 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::put('/users/{id}', [UserController::class, 'update']);
     Route::delete('/users/{id}', [UserController::class, 'destroy']);
     Route::put('/users/{id}/update-password', [UserController::class, 'updatePassword']);
-
     Route::get('/tenant/integration', [AgentIntegrationController::class, 'index']);
     Route::put('/tenant/integration/{agent}', [AgentIntegrationController::class, 'update']);
     Route::post('/tenant/integration/update-google', [AgentIntegrationController::class, 'updateGoogle']);
     Route::post('/tenant/integration/update-twilio', [AgentIntegrationController::class, 'updateTwilio']);
     Route::post('/tenant/integration/update-openai', [AgentIntegrationController::class, 'updateOpenAI']);
-    Route::post('/api/tenant/integration/update-outlook', [AgentIntegrationController::class, 'updateOutlook']);
-    Route::get('/api/tenant/integration/outlook-token', [AgentIntegrationController::class, 'getOutlookAccessToken']);
+    Route::post('/tenant/integration/update-outlook', [AgentIntegrationController::class, 'updateOutlook']);
+    Route::get('/tenant/integration/outlook-token', [AgentIntegrationController::class, 'getOutlookAccessToken']);
     Route::post('/tenant/integration/update-sendgrid', [AgentIntegrationController::class, 'updateSendgrid']);
-
     Route::post('/tenant/integration/disconnect', [AgentIntegrationController::class, 'disconnect']);
-
     Route::get('/tenant', [CompanyController::class, 'index']);
     Route::put('/tenant', [CompanyController::class, 'update']);
 });

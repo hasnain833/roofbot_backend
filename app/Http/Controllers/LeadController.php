@@ -90,15 +90,17 @@ class LeadController extends Controller
         $this->createFollowups($lead);
 
 
-        if ($lead->phone) {
-            $tenant_agent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
+        $tenant_agent = TenantAgent::where('tenant_id', $tenant->id)->first();
+
+        if ($lead->phone && $tenant_agent) {
             $integration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->id)
                 ->where('provider', 'twilio')
                 ->first();
 
             if ($integration) {
                 try {
-                    $client = new Client($integration->key, $integration->secret);
+                    $guzzleClient = new \GuzzleHttp\Client(['verify' => false]);
+                    $client = new Client($integration->key, $integration->secret, null, null, new \Twilio\Http\GuzzleClient($guzzleClient));
                     $numbers = $client->incomingPhoneNumbers->read();
                     $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
                     $template = \App\Models\TenantSmsTemplate::where('tenant_id', $tenant->id)
@@ -127,13 +129,21 @@ class LeadController extends Controller
                         'sid' => $twilioMessage->sid,
                     ]);
 
+                    Log::info('✅ SMS SENT SUCCESSFULLY', [
+                        'lead_id' => $lead->id,
+                        'phone' => $lead->phone,
+                        'message_sid' => $twilioMessage->sid,
+                        'status' => $twilioMessage->status,
+                    ]);
+
                 } catch (\Exception $e) {
-                    Log::error("Twilio send failed: " . $e->getMessage());
-                    return response()->json([
-                        'message' => 'Lead created but failed to send SMS',
-                        'sms_error' => $e->getMessage(),
-                        'data' => $lead
-                    ], 200);
+                    Log::error('❌ SMS FAILED', [
+                        'lead_id' => $lead->id,
+                        'phone' => $lead->phone,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
+                    // Don't return error here to allow email to try
                 }
             }
         }
@@ -162,27 +172,45 @@ class LeadController extends Controller
                         $body
                     );
 
-                    $email = new Mail();
+                    $fullName = trim($lead->first_name . ' ' . ($lead->last_name ?? ''));
 
                     $fromEmail = $sendgridIntegration->from_email ?? 'no-reply@yourcompany.com';
 
-                    $email->setFrom($fromEmail, $tenant->company ?? 'Your Company');
-                    $email->setSubject($subject);
+                    $response = Http::withoutVerifying()
+                        ->withHeaders(['Authorization' => 'Bearer ' . $sendgridIntegration->key])
+                        ->post('https://api.sendgrid.com/v3/mail/send', [
+                            'personalizations' => [
+                                [
+                                    'to' => [['email' => $lead->email, 'name' => $fullName]],
+                                    'subject' => $subject,
+                                ]
+                            ],
+                            'from' => ['email' => $fromEmail, 'name' => $tenant->company ?? 'Your Company'],
+                            'content' => [
+                                ['type' => 'text/plain', 'value' => $body]
+                            ]
+                        ]);
 
-                    $fullName = trim($lead->first_name . ' ' . ($lead->last_name ?? ''));
-                    $email->addTo($lead->email, $fullName);
-                    $email->addContent("text/plain", $body);
-
-                    $sendgrid = new SendGrid($sendgridIntegration->key);
-                    $sendgrid->send($email);
-
-                    \Log::info('Lead email sent', [
+                    if ($response->successful()) {
+                        Log::info('✅ EMAIL SENT SUCCESSFULLY', [
+                            'lead_id' => $lead->id,
+                            'email' => $lead->email,
+                            'subject' => $subject,
+                        ]);
+                    } else {
+                        Log::error('❌ EMAIL FAILED - SendGrid API Error', [
+                            'lead_id' => $lead->id,
+                            'email' => $lead->email,
+                            'status_code' => $response->status(),
+                            'error_body' => $response->body(),
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    Log::error('❌ EMAIL FAILED - Exception', [
                         'lead_id' => $lead->id,
                         'email' => $lead->email,
-                    ]);
-                } catch (\Exception $e) {
-                    \Log::error('Lead email failed: ' . $e->getMessage(), [
-                        'lead_id' => $lead->id,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
                     ]);
                 }
             }
@@ -407,7 +435,8 @@ Service Type: {$serviceType}";
 
             if ($integration) {
                 try {
-                    $client = new Client($integration->key, $integration->secret);
+                    $guzzleClient = new \GuzzleHttp\Client(['verify' => false]);
+                    $client = new Client($integration->key, $integration->secret, null, null, new \Twilio\Http\GuzzleClient($guzzleClient));
                     $numbers = $client->incomingPhoneNumbers->read();
                     $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
                     $serviceName = optional($lead->serviceType)->name ?? 'our service';
@@ -424,13 +453,82 @@ Service Type: {$serviceType}";
                         'out' => true,
                         'status' => 'sent',
                     ]);
+
+                    Log::info('✅ PUBLIC SMS SENT SUCCESSFULLY', [
+                        'lead_id' => $lead->id,
+                        'phone' => $lead->phone,
+                    ]);
+
                 } catch (\Exception $e) {
-                    Log::error("Twilio send failed: " . $e->getMessage());
-                    return response()->json([
-                        'message' => 'Lead created but failed to send SMS',
-                        'sms_error' => $e->getMessage(),
-                        'data' => $lead
-                    ], 200);
+                    Log::error('❌ PUBLIC SMS FAILED', [
+                        'lead_id' => $lead->id,
+                        'phone' => $lead->phone,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
+                    // Don't return error here to allow email to try
+                }
+            }
+        }
+
+        // ================== SEND LEAD EMAIL (PUBLIC) ==================
+        if ($lead->email) {
+            $tenant_agent = $tenant_agent ?? TenantAgent::where('tenant_id', $validated['tenant_id'])->first();
+            if ($tenant_agent) {
+                $sendgridIntegration = TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->id)
+                    ->where('provider', 'sendgrid')
+                    ->first();
+
+                if ($sendgridIntegration) {
+                    try {
+                        $template = \App\Models\TenantEmailTemplate::where('tenant_id', $validated['tenant_id'])
+                            ->where('type', 'lead')
+                            ->first();
+
+                        $subject = $template?->subject ?? 'Thank You';
+                        $body = $template?->message ?? "Hi {first_name},\n\nThank you for your interest in our services";
+
+                        $body = str_replace('{first_name}', $lead->first_name, $body);
+                        $body = str_replace('{service_type}', optional($lead->serviceType)->name ?? 'our services', $body);
+
+                        $fullName = trim($lead->first_name . ' ' . ($lead->last_name ?? ''));
+                        
+                        $response = Http::withoutVerifying()
+                            ->withHeaders(['Authorization' => 'Bearer ' . $sendgridIntegration->key])
+                            ->post('https://api.sendgrid.com/v3/mail/send', [
+                                'personalizations' => [
+                                    [
+                                        'to' => [['email' => $lead->email, 'name' => $fullName]],
+                                        'subject' => $subject,
+                                    ]
+                                ],
+                                'from' => ['email' => $fromEmail, 'name' => $companyName],
+                                'content' => [
+                                    ['type' => 'text/plain', 'value' => $body]
+                                ]
+                            ]);
+
+                        if ($response->successful()) {
+                            Log::info('✅ PUBLIC EMAIL SENT SUCCESSFULLY', [
+                                'lead_id' => $lead->id,
+                                'email' => $lead->email,
+                            ]);
+                        } else {
+                            Log::error('❌ PUBLIC EMAIL FAILED - SendGrid API Error', [
+                                'lead_id' => $lead->id,
+                                'email' => $lead->email,
+                                'status_code' => $response->status(),
+                                'error_body' => $response->body(),
+                            ]);
+                        }
+                    } catch (\Exception $e) {
+                        Log::error('❌ PUBLIC EMAIL FAILED - Exception', [
+                            'lead_id' => $lead->id,
+                            'email' => $lead->email,
+                            'error' => $e->getMessage(),
+                            'trace' => $e->getTraceAsString(),
+                        ]);
+                    }
                 }
             }
         }
