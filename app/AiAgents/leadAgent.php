@@ -10,9 +10,9 @@ use App\Jobs\SyncAppointmentToGoogle;
 use App\Jobs\SyncAppointmentToOutlook;
 use Illuminate\Support\Facades\Log;
 use Twilio\Rest\Client;
-use SendGrid\Mail\Mail;
-use SendGrid;
+
 use App\Models\Reminder;
+use Illuminate\Support\Facades\Http;
 use Carbon\Carbon;
 
 
@@ -34,6 +34,13 @@ class LeadAgent extends Agent
     protected ?string $currentLeadId = null;
     protected bool $leadCreated = false;
     protected int $customAnsweredCount = 0;
+    protected string $visitorTimezone = 'UTC';
+
+    public function setVisitorTimezone(string $timezone): self
+    {
+        $this->visitorTimezone = $timezone;
+        return $this;
+    }
 
 
 
@@ -80,6 +87,11 @@ class LeadAgent extends Agent
 
     public function instructions(): string
     {
+        $now = now()->setTimezone($this->visitorTimezone);
+        $currentDate = $now->format('l, F j, Y');
+        $currentTime = $now->format('g:i A');
+        $currentYear = $now->format('Y');
+
         $tenantPromptSection = $this->tenantPrompt
             ? "\n\nTENANT-SPECIFIC BEHAVIOR:\n────────────────────────\n{$this->tenantPrompt}\n"
             : '';
@@ -94,6 +106,19 @@ class LeadAgent extends Agent
         )->implode("\n");
 
         return <<<PROMPT
+CRITICAL: THE CURRENT YEAR IS {$currentYear}. YOU MUST BOOK ALL APPOINTMENTS FOR THE YEAR {$currentYear}.
+
+TIMEZONE CONTEXT:
+- YOUR LOCATION: {$this->visitorTimezone}
+- CURRENT LOCAL DATE: {$currentDate}
+- CURRENT LOCAL TIME: {$currentTime}
+
+IMPORTANT: All dates and times provided by the user are in {$this->visitorTimezone} timezone. When calling the book_appointment tool, you MUST pass the user's local time exactly as a string (YYYY-MM-DD HH:mm:ss). DO NOT perform any UTC conversion yourself.
+
+Example: If the user says "4pm tomorrow", and tomorrow is Jan 20, 2026:
+1. Local time is 2026-01-20 16:00:00 ({$this->visitorTimezone}).
+2. Call tool with start_time: "2026-01-20 16:00:00" and end_time: "2026-01-20 17:00:00".
+
 You are a friendly roofing intake assistant. Your job is to collect customer information for booking appointments.
 
 IMPORTANT: 
@@ -102,12 +127,12 @@ IMPORTANT:
 
 DATA TO COLLECT (in this order):
 1. Full Name (first and last)
-2. Phone Number
+2. Phone Number (Give an example, like: country code + number, e.g., 923XXXXXXXXX)
 3. Email Address
 4. Service Type (must be one of the following):
 {$serviceTypeText}
 5. Complete Address (street address, city, state, zip code, country)
-6. Preferred Appointment Date & Time (format: MM/DD/YY H:MM AM/PM)
+6. Preferred Appointment Date & Time (Ask NATURALLY, NEVER ask for a specific format like MM/DD/YY)
 
 
 
@@ -117,14 +142,18 @@ WORKFLOW:
 PHASE 1: COLLECT BASIC INFORMATION
 ───────────────────────────────────
 • Greet the customer and ask for their full name (if not already provided)
-• Once you have name, ask for phone number
+• Once you have name, ask for phone number. Explicitly provide an example format (e.g., country code + number).
 • Once you have phone, ask for email
-• Once you have email, ask what service they need from the available services listed
+• Once you have email, ask what service they need. You MUST list available services vertically.
+• Ask the user to provide the exact name of the service they want.
 • The service must match ONE of the tenant's service types exactly
 • Once you have service, ask for complete address (address, street, city, state, zip, country)
-• once address is recieved must call create_lead toll then ask for appointment date and time. 
-• Dont tell users that you created a lead or calling create_lead tool for lead creation.
-DO NOT ASK FOR THE SAME INFORMATION TWICE. Review the conversation summary above.
+• Once address is received, call the create_lead tool IMMEDIATELY. 
+• After lead is created, you MUST first ask all custom questions (Phase 3) before asking for appointment date/time.
+• After lead is created and ALL custom questions are answered, ask for the appointment date and time.
+• IMPORTANT: Do NOT tell the user you are creating a lead or calling a tool.
+• IMPORTANT: Do NOT ask for a specific date/time format (like MM/DD/YY). Just ask a natural question like "What date and time work best for you?".
+• NEVER repeat already provided information. Review the conversation summary.
 
 PHASE 2: CREATE LEAD (when all info is collected)
 ──────────────────────────────────────────────────
@@ -173,13 +202,14 @@ After user answers a question:
 
 PHASE 4: COLLECT APPOINTMENT DETAILS (after lead is created and custom questions are asked)
 ───────────────────────────────────────────────────────────
-After the lead is created, ask the customer:
-'What date and time work best for your appointment? Please provide in format: MM/DD/YY H:MM AM/PM (for example: 12/25/25 2:00 PM)'
+After the lead is created and custom questions are answered, ask the customer:
+'What date and time work best for your appointment?'
+(NEVER ask for a specific format like MM/DD/YY).
 
 When user provides the date/time:
 1. Parse the date and time from their response
 2. Convert to ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ
-   Example: 12/25/25 2:00 PM → 2025-12-25T14:00:00Z
+   Example: 'January 20 at 3pm' → 2026-01-20T15:00:00Z
 3. Calculate end time as 1 hour after start time
 4. Call book_appointment tool
 
@@ -255,7 +285,12 @@ PROMPT;
             ->map(fn($q, $i) => ($i + 1) . ". {$q['question']}")
             ->implode("\n");
 
+        $now = now()->setTimezone($this->visitorTimezone);
+        $currentYear = $now->format('Y');
+
         $basePrompt = <<<PROMPT
+CURRENT YEAR: {$currentYear}
+CURRENT LOCAL TIME ({$this->visitorTimezone}): {$now->format('g:i A')}
 {$tenantPrompt}
 
 AVAILABLE SERVICE TYPES:
@@ -279,12 +314,60 @@ PROMPT;
     }
     protected function closestMatch(string $input, array $options): string
     {
+        $input = trim($input);
+        if (empty($input) || empty($options)) {
+            return $options[0] ?? 'General';
+        }
+
+        // 1. Normalize helper: lowercase and remove non-alphanumeric
+        $normalize = function ($str) {
+            $str = strtolower($str);
+            // Replace various hyphens/dashes with space, then remove special chars
+            $str = str_replace(['-', '–', '—', '‑'], ' ', $str);
+            return preg_replace('/[^a-z0-9\s]/', '', $str);
+        };
+
+        $normalizedInput = $normalize($input);
+
+        // 3. Exact normalized match
         foreach ($options as $option) {
-            if (stripos($input, $option) !== false) {
+            if ($normalize($option) === $normalizedInput) {
                 return $option;
             }
         }
-        return $options[0] ?? 'General';
+
+        // 4. Partial normalized match (priority to starts with)
+        foreach ($options as $option) {
+            $normalizedOption = $normalize($option);
+            if (str_starts_with($normalizedOption, $normalizedInput) || str_starts_with($normalizedInput, $normalizedOption)) {
+                return $option;
+            }
+        }
+        
+        foreach ($options as $option) {
+            if (stripos($normalize($option), $normalizedInput) !== false) {
+                return $option;
+            }
+        }
+
+        // 5. Levenshtein Fuzzy Match as last resort
+        $bestMatch = $options[0];
+        $shortest = -1;
+
+        foreach ($options as $option) {
+            $lev = levenshtein($normalizedInput, $normalize($option));
+            if ($lev === 0) {
+                return $option;
+            }
+            if ($lev <= $shortest || $shortest < 0) {
+                $bestMatch = $option;
+                $shortest = $lev;
+            }
+        }
+
+        // If even the best match is too far (e.g., completely different topic), 
+        // we might want to default, but here we'll take the best fuzzy match found.
+        return $bestMatch;
     }
 private function createFollowups(Lead $lead)
 {
@@ -337,6 +420,11 @@ private function createReminder(Appointment $appointment)
         string $Status = 'New'
     ): string {
         try {
+            Log::info('CHATBOT create_lead tool called', [
+                'tenant_id' => $this->tenantId,
+                'name' => "$first_name $last_name",
+                'service' => $service_type_name
+            ]);
             if (
                 empty($first_name) || empty($last_name) || empty($phone) || empty($email) ||
                 empty($address) || empty($city) || empty($state) || empty($zip) || empty($country)
@@ -347,15 +435,26 @@ private function createReminder(Appointment $appointment)
                 return $this->currentLeadId;
             }
 
+            if (empty($this->serviceTypes)) {
+                $this->serviceTypes = \App\Models\ServiceType::where('tenant_id', $this->tenantId)
+                    ->select('id', 'name')
+                    ->get()
+                    ->toArray();
+            }
+
             $serviceNames = collect($this->serviceTypes)->pluck('name')->toArray();
             $service_type_name = $this->closestMatch($service_type_name, $serviceNames);
 
-            $serviceType = \App\Models\ServiceType::where('tenant_id', $this->tenantId)
-                ->whereRaw('LOWER(name) = ?', [strtolower($service_type_name)])
-                ->first();
+            $matchedService = collect($this->serviceTypes)->first(function ($s) use ($service_type_name) {
+                return $s['name'] === $service_type_name;
+            });
 
-            if (!$serviceType) {
-                $serviceType = \App\Models\ServiceType::where('tenant_id', $this->tenantId)->first();
+            $service_type_id = $matchedService ? (is_array($matchedService) ? $matchedService['id'] : $matchedService->id) : null;
+
+            if (!$service_type_id && !empty($this->serviceTypes)) {
+                $first = $this->serviceTypes[0];
+                $service_type_id = is_array($first) ? $first['id'] : $first->id;
+                $service_type_name = is_array($first) ? $first['name'] : $first->name;
             }
 
 
@@ -368,7 +467,7 @@ private function createReminder(Appointment $appointment)
                 'phone' => $phone,
                 'email' => $email,
                 'service_type_name' => $service_type_name,
-                'service_type_id' => $serviceType?->id,
+                'service_type_id' => $service_type_id,
                 'address' => $address,
                 'city' => $city,
                 'state' => $state,
@@ -388,7 +487,8 @@ private function createReminder(Appointment $appointment)
 
                 if ($integration) {
                     try {
-                        $client = new Client($integration->key, $integration->secret);
+                        $client = new Client($integration->key, $integration->secret, null, null);
+                        
                         $numbers = $client->incomingPhoneNumbers->read();
                         $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
                         $template = \App\Models\TenantSmsTemplate::where('tenant_id', $this->tenantId)
@@ -418,16 +518,12 @@ private function createReminder(Appointment $appointment)
 
                     } catch (\Exception $e) {
                         Log::error("Twilio send failed: " . $e->getMessage());
-                        return response()->json([
-                            'message' => 'Lead created but failed to send SMS',
-                            'sms_error' => $e->getMessage(),
-                            'data' => $lead
-                        ], 200);
                     }
                 }
             }
             // ================== SEND LEAD EMAIL ==================
-if (!empty($lead->email)) {
+            Log::info('CHATBOT attempting lead email', ['email' => $lead->email]);
+            if (!empty($lead->email)) {
     $tenant_agent = \App\Models\TenantAgent::where('tenant_id', $this->tenantId)->first();
 
     $sendgridIntegration = \App\Models\TenantAgentIntegration::where('tenant_agent_id', $tenant_agent->id)
@@ -435,6 +531,7 @@ if (!empty($lead->email)) {
         ->first();
 
     if ($sendgridIntegration) {
+        \Log::info('CHATBOT found SendGrid integration', ['lead_id' => $lead->id]);
         try {
             $template = \App\Models\TenantEmailTemplate::where('tenant_id', $this->tenantId)
                 ->where('type', 'lead')
@@ -446,31 +543,87 @@ if (!empty($lead->email)) {
             $subject = $template?->subject ?? $defaultSubject;
             $body = $template?->message ?? $defaultBody;
 
-            $body = str_replace('{first_name}', $lead->first_name, $body);
-            $body = str_replace('{service_type}', $lead->service_type_name ?? 'our services', $body);
+            // NEW: Variables for company info
+            $companyName = $tenant_agent->tenant->company ?? 'Our Company';
+            $companyPhone = $tenant_agent->tenant->phone ?? '';
+            $companyDomain = $tenant_agent->tenant->domain ?? '';
 
-            $email = new Mail();
+            // Variables for replacement
+            $firstName = $lead->first_name;
+            $serviceType = $lead->service_type_name ?? 'our services';
+
+            // Replacement in body
+            $body = str_replace('{first_name}', $firstName, $body);
+            $body = str_replace('{service_type}', $serviceType, $body);
+            $body = str_replace('{company_name}', $companyName, $body);
+            $body = str_replace('{company_phone_number}', $companyPhone, $body);
+            $body = str_replace('{company_phone}', $companyPhone, $body);
+            $body = str_replace('{company_domain}', $companyDomain, $body);
+
+            // Replacement in subject
+            $subject = str_replace('{first_name}', $firstName, $subject);
+            $subject = str_replace('{service_type}', $serviceType, $subject);
+            $subject = str_replace('{company_name}', $companyName, $subject);
+            $subject = str_replace('{company_phone_number}', $companyPhone, $subject);
+            $subject = str_replace('{company_phone}', $companyPhone, $subject);
+
+            $htmlContent = view('emails.layout', [
+                'subject' => $subject,
+                'body' => $body,
+                'company_name' => $companyName,
+                'company_domain' => $companyDomain,
+                'company_phone' => $companyPhone
+            ])->render();
 
             $fromEmail = $sendgridIntegration->from_email ?? 'no-reply@yourcompany.com';
 
-            $email->setFrom($fromEmail, 'Your Company');
-            $email->setSubject($subject);
-            $email->addTo($lead->email, trim($lead->first_name . ' ' . $lead->last_name));
-            $email->addContent("text/plain", $body);
+            $response = Http::withHeaders(['Authorization' => 'Bearer ' . $sendgridIntegration->key])
+                ->post('https://api.sendgrid.com/v3/mail/send', [
+                    'personalizations' => [
+                        [
+                            'to' => [['email' => $lead->email, 'name' => trim($lead->first_name . ' ' . $lead->last_name)]],
+                            'subject' => $subject,
+                        ]
+                    ],
+                    'from' => [
+                        'email' => $fromEmail, 
+                        'name' => $tenant_agent->tenant->company ?? 'Your Company'
+                    ],
+                    'content' => [
+                        ['type' => 'text/html', 'value' => $htmlContent]
+                    ],
+                    'tracking_settings' => [
+                        'click_tracking' => ['enable' => false, 'enable_text' => false],
+                        'open_tracking'  => ['enable' => false]
+                    ]
+                ]);
 
-            $sendgrid = new SendGrid($sendgridIntegration->key);
-            $sendgrid->send($email);
+            if ($response->successful()) {
+                \Log::info('Lead email sent via chatbot', [
+                    'lead_id' => $lead->id,
+                    'email' => $lead->email,
+                    'status_code' => $response->status()
+                ]);
+            } else {
+                \Log::warning('Lead email failed via chatbot', [
+                    'lead_id' => $lead->id,
+                    'status_code' => $response->status(),
+                    'response' => $response->body()
+                ]);
+            }
 
-            \Log::info('Lead email sent via chatbot', [
-                'lead_id' => $lead->id,
-                'email' => $lead->email
-            ]);
+
         } catch (\Exception $e) {
             \Log::error('Chatbot lead email failed', [
                 'error' => $e->getMessage(),
                 'lead_id' => $lead->id
             ]);
         }
+    } else {
+        \Log::warning('CHATBOT SendGrid integration NOT FOUND for tenant agent', [
+            'tenant_id' => $this->tenantId,
+            'agent_id' => $tenant_agent->id
+        ]);
     }
 }
 
@@ -562,6 +715,32 @@ if ($leadId <= 0) {
                 return "Error: Missing required appointment information.";
             }
 
+            if (empty($this->serviceTypes)) {
+                $this->serviceTypes = \App\Models\ServiceType::where('tenant_id', $this->tenantId)
+                    ->select('id', 'name')
+                    ->get()
+                    ->toArray();
+            }
+
+            $serviceNames = collect($this->serviceTypes)->pluck('name')->toArray();
+            $service_type = $this->closestMatch($service_type, $serviceNames);
+
+            // Parse time assuming it is in the visitor's local timezone
+            $startCarbon = Carbon::parse($start_time, $this->visitorTimezone);
+            $endCarbon = Carbon::parse($end_time, $this->visitorTimezone);
+
+            // Safety net: Force the year to be current (2026) if it's 2023
+            if ($startCarbon->year === 2023) {
+                $startCarbon->year = now()->year;
+            }
+            if ($endCarbon->year === 2023) {
+                $endCarbon->year = now()->year;
+            }
+
+            // Convert to UTC for standardized database storage
+            $start_time = $startCarbon->setTimezone('UTC')->toIso8601String();
+            $end_time = $endCarbon->setTimezone('UTC')->toIso8601String();
+
             $appointment = Appointment::create([
                 'tenant_id' => $this->tenantId,
                 'lead_id' => $lead_id,
@@ -576,17 +755,17 @@ if ($leadId <= 0) {
 
             $lead = Lead::find($lead_id);
 
+            $tenantAgent = \App\Models\TenantAgent::where('tenant_id', $this->tenantId)->first();
+
             if ($lead && $lead->phone) {
-
-                $tenantAgent = \App\Models\TenantAgent::where('tenant_id', $this->tenantId)->first();
-
                 $twilioIntegration = \App\Models\TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
                     ->where('provider', 'twilio')
                     ->first();
 
                 if ($twilioIntegration) {
 
-                    $client = new Client($twilioIntegration->key, $twilioIntegration->secret);
+                    $client = new Client($twilioIntegration->key, $twilioIntegration->secret, null, null);
+                    
                     $numbers = $client->incomingPhoneNumbers->read();
                     $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
 
@@ -602,14 +781,21 @@ if ($leadId <= 0) {
                     $body = str_replace('{service_type}', $service_type, $body);
                     $body = str_replace(
                         '{date_time}',
-                        Carbon::parse($start_time)->format('M d, Y h:i A'),
+                        Carbon::parse($start_time)->setTimezone($this->visitorTimezone)->format('M d, Y h:i A'),
                         $body
                     );
 
-                    $client->messages->create($lead->phone, [
-                        'from' => $fromNumber,
-                        'body' => $body,
-                    ]);
+                    try {
+                        $client->messages->create($lead->phone, [
+                            'from' => $fromNumber,
+                            'body' => $body,
+                        ]);
+                    } catch (\Exception $smsEx) {
+                        Log::warning('Chatbot appointment SMS failed', [
+                            'error' => $smsEx->getMessage(),
+                            'lead_id' => $lead->id
+                        ]);
+                    }
 
                     \App\Models\Message::create([
                         'lead_id' => $lead->id,
@@ -625,6 +811,7 @@ if ($leadId <= 0) {
                 ->first();
 
             if ($sendgridIntegration) {
+                \Log::info('CHATBOT found SendGrid integration for appointment', ['lead_id' => $lead->id]);
                 try {
                     $template = \App\Models\TenantEmailTemplate::where('tenant_id', $this->tenantId)
                         ->where('type', 'appointment')
@@ -636,26 +823,68 @@ if ($leadId <= 0) {
                     $subject = $template?->subject ?? $defaultSubject;
                     $body = $template?->message ?? $defaultBody;
 
-                    $body = str_replace('{first_name}', $lead->first_name, $body);
-                    $body = str_replace('{service_type}', $service_type ?? 'our services', $body);
-                    $body = str_replace('{date_time}', Carbon::parse($start_time)->format('M d, Y h:i A'), $body);
+                    // Variables for replacement
+                    $firstName = $lead->first_name;
+                    $fullName = trim($lead->first_name . ' ' . $lead->last_name);
+                    $serviceTypeName = $service_type ?? 'our services';
+                    $dateTimeFormatted = Carbon::parse($start_time)->setTimezone($this->visitorTimezone)->format('M d, Y h:i A');
+
+                    // NEW: Variables for company info
+                    $companyName = $tenantAgent->tenant->company ?? 'Our Company';
+                    $companyPhone = $tenantAgent->tenant->phone ?? '';
+                    $companyDomain = $tenantAgent->tenant->domain ?? '';
+
+                    // Replacement in body
+                    $body = str_replace('{first_name}', $firstName, $body);
+                    $body = str_replace('{service_type}', $serviceTypeName, $body);
+                    $body = str_replace('{date_time}', $dateTimeFormatted, $body);
+                    $body = str_replace('{company_name}', $companyName, $body);
+                    $body = str_replace('{company_phone}', $companyPhone, $body);
+                    $body = str_replace('{company_phone_number}', $companyPhone, $body);
+                    $body = str_replace('{company_domain}', $companyDomain, $body);
+
+                    // Replacement in subject
+                    $subject = str_replace('{first_name}', $firstName, $subject);
+                    $subject = str_replace('{service_type}', $serviceTypeName, $subject);
+                    $subject = str_replace('{date_time}', $dateTimeFormatted, $subject);
+                    $subject = str_replace('{company_name}', $companyName, $subject);
+                    $subject = str_replace('{company_phone_number}', $companyPhone, $subject);
+                    $subject = str_replace('{company_phone}', $companyPhone, $subject);
 
                     $fromEmail = $sendgridIntegration->from_email ?? 'no-reply@yourcrm.com'; 
 
-                    $email = new Mail();
-                    $email->setFrom($fromEmail, $tenantAgent->tenant->company ?? 'Your Company');
-                    $email->setSubject($subject);
+                    $htmlContent = view('emails.layout', [
+                        'subject' => $subject,
+                        'body' => $body,
+                        'company_name' => $tenantAgent->tenant->company ?? 'Our Company',
+                        'company_domain' => $tenantAgent->tenant->domain ?? '',
+                        'company_phone' => $tenantAgent->tenant->phone ?? ''
+                    ])->render();
 
-                    $fullName = trim($lead->first_name . ' ' . ($lead->last_name ?? ''));
-                    $email->addTo($lead->email, $fullName);
-                    $email->addContent("text/plain", $body);
+                    $response = Http::withHeaders(['Authorization' => 'Bearer ' . $sendgridIntegration->key])
+                        ->post('https://api.sendgrid.com/v3/mail/send', [
+                            'personalizations' => [
+                                [
+                                    'to' => [['email' => $lead->email, 'name' => $fullName]],
+                                    'subject' => $subject,
+                                ]
+                            ],
+                            'from' => [
+                                'email' => $fromEmail, 
+                                'name' => $tenantAgent->tenant->company ?? 'Your Company'
+                            ],
+                            'content' => [
+                                ['type' => 'text/html', 'value' => $htmlContent]
+                            ],
+                            'tracking_settings' => [
+                                'click_tracking' => ['enable' => false, 'enable_text' => false],
+                                'open_tracking'  => ['enable' => false]
+                            ]
+                        ]);
 
-                    $sendgrid = new SendGrid($sendgridIntegration->key);
-                    $response = $sendgrid->send($email);
+                    $statusCode = $response->status();
 
-                    $statusCode = $response?->statusCode();
-
-                    if ($statusCode === 202) {
+                    if ($response->successful()) {
                         Log::info('Chatbot appointment email sent successfully', [
                             'appointment_id' => $appointment->id,
                             'to' => $lead->email,
@@ -674,6 +903,11 @@ if ($leadId <= 0) {
                         'to' => $lead->email ?? 'unknown',
                     ]);
                 }
+            } else {
+                \Log::warning('CHATBOT SendGrid integration NOT FOUND for appointment email', [
+                    'tenant_id' => $this->tenantId,
+                    'agent_id' => $tenantAgent->id
+                ]);
             }
         }
             

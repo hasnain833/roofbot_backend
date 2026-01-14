@@ -42,7 +42,7 @@ return [
         'default' => [
             'label' => 'openai',
             'api_key' => env('OPENAI_API_KEY'),
-            'driver' => \App\AiAgents\Drivers\CustomOpenAiDriver::class,
+            'driver' => \LarAgent\Drivers\OpenAi\OpenAiDriver::class,
             'default_context_window' => 50000,
             'default_max_completion_tokens' => 10000,
             'default_temperature' => 1,

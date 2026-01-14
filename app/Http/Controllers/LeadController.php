@@ -13,8 +13,7 @@ use Twilio\Rest\Client;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use SendGrid;
-use SendGrid\Mail\Mail;
+
 
 
 
@@ -99,18 +98,21 @@ class LeadController extends Controller
 
             if ($integration) {
                 try {
-                    $guzzleClient = new \GuzzleHttp\Client(['verify' => false]);
-                    $client = new Client($integration->key, $integration->secret, null, null, new \Twilio\Http\GuzzleClient($guzzleClient));
+                    $client = new Client($integration->key, $integration->secret, null, null);
                     $numbers = $client->incomingPhoneNumbers->read();
                     $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
                     $template = \App\Models\TenantSmsTemplate::where('tenant_id', $tenant->id)
                         ->where('type', 'lead')
                         ->first();
 
-                    $body = $template ? $template->message : "Hello {first_name}, thank you for showing interest in {service_type} services.";
+                    $body = $template ? $template->message : "Hello {first_name}, thank you for showing interest in {service_type} services at {company_name}!";
 
                     $body = str_replace('{first_name}', $lead->first_name, $body);
                     $body = str_replace('{service_type}', optional($lead->serviceType)->name ?? ' services', $body);
+                    $body = str_replace('{company_name}', $tenant->company ?? '', $body);
+                    $body = str_replace('{company_domain}', $tenant->domain ?? '', $body);
+                    $body = str_replace('{company_phone_number}', $tenant->phone ?? '', $body);
+                    $body = str_replace('{company_phone}', $tenant->phone ?? '', $body);
 
                     $statusCallbackUrl = env('APP_URL') . '/api/twilio/status';
 
@@ -160,24 +162,47 @@ class LeadController extends Controller
                         ->first();
 
                     $defaultSubject = 'Thank You';
-                    $defaultBody = "Hi {first_name},\n\nThank you for your interest in our services";
+                    $defaultBody = "Hi {first_name},\n\nThank you for your interest in {service_type} services at {company_name}.\n\nVisit us: {company_domain}";
 
                     $subject = $template?->subject ?? $defaultSubject;
                     $body = $template?->message ?? $defaultBody;
 
+                    // Variable replacement for body
                     $body = str_replace('{first_name}', $lead->first_name, $body);
                     $body = str_replace(
                         '{service_type}',
                         optional($lead->serviceType)->name ?? 'our services',
                         $body
                     );
+                    $body = str_replace('{company_name}', $tenant->company ?? '', $body);
+                    $body = str_replace('{company_domain}', $tenant->domain ?? '', $body);
+                    $body = str_replace('{company_phone_number}', $tenant->phone ?? '', $body);
+
+                    // Variable replacement for subject
+                    $subject = str_replace('{first_name}', $lead->first_name, $subject);
+                    $subject = str_replace(
+                        '{service_type}',
+                        optional($lead->serviceType)->name ?? 'our services',
+                        $subject
+                    );
+                    $subject = str_replace('{company_name}', $tenant->company ?? '', $subject);
+                    $subject = str_replace('{company_domain}', $tenant->domain ?? '', $subject);
+                    $subject = str_replace('{company_phone_number}', $tenant->phone ?? '', $subject);
+                    $subject = str_replace('{company_phone}', $tenant->phone ?? '', $subject);
 
                     $fullName = trim($lead->first_name . ' ' . ($lead->last_name ?? ''));
 
-                    $fromEmail = $sendgridIntegration->from_email ?? 'no-reply@yourcompany.com';
+                    $fromEmail = $sendgridIntegration->from_email ?? 'no-reply@yourdefault.com';
 
-                    $response = Http::withoutVerifying()
-                        ->withHeaders(['Authorization' => 'Bearer ' . $sendgridIntegration->key])
+                    $htmlContent = view('emails.layout', [
+                        'subject' => $subject,
+                        'body' => $body,
+                        'company_name' => $tenant->company ?? 'Our Company',
+                        'company_domain' => $tenant->domain ?? '',
+                        'company_phone' => $tenant->phone ?? ''
+                    ])->render();
+
+                    $response = Http::withHeaders(['Authorization' => 'Bearer ' . $sendgridIntegration->key])
                         ->post('https://api.sendgrid.com/v3/mail/send', [
                             'personalizations' => [
                                 [
@@ -185,9 +210,16 @@ class LeadController extends Controller
                                     'subject' => $subject,
                                 ]
                             ],
-                            'from' => ['email' => $fromEmail, 'name' => $tenant->company ?? 'Your Company'],
+                            'from' => [
+                                'email' => $fromEmail, 
+                                'name' => $tenant->company ?? 'Your Company'
+                            ],
                             'content' => [
-                                ['type' => 'text/plain', 'value' => $body]
+                                ['type' => 'text/html', 'value' => $htmlContent]
+                            ],
+                            'tracking_settings' => [
+                                'click_tracking' => ['enable' => false, 'enable_text' => false],
+                                'open_tracking'  => ['enable' => false]
                             ]
                         ]);
 
@@ -435,8 +467,7 @@ Service Type: {$serviceType}";
 
             if ($integration) {
                 try {
-                    $guzzleClient = new \GuzzleHttp\Client(['verify' => false]);
-                    $client = new Client($integration->key, $integration->secret, null, null, new \Twilio\Http\GuzzleClient($guzzleClient));
+                    $client = new Client($integration->key, $integration->secret, null, null);
                     $numbers = $client->incomingPhoneNumbers->read();
                     $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
                     $serviceName = optional($lead->serviceType)->name ?? 'our service';
@@ -486,15 +517,26 @@ Service Type: {$serviceType}";
                             ->first();
 
                         $subject = $template?->subject ?? 'Thank You';
-                        $body = $template?->message ?? "Hi {first_name},\n\nThank you for your interest in our services";
+                        $body = $template?->message ?? "Hi {first_name},\n\nThank you for your interest in {service_type} services at {company_name}.\n\nVisit us: {company_domain}";
 
                         $body = str_replace('{first_name}', $lead->first_name, $body);
                         $body = str_replace('{service_type}', optional($lead->serviceType)->name ?? 'our services', $body);
+                        $body = str_replace('{company_name}', $tenant->company ?? '', $body);
+                        $body = str_replace('{company_domain}', $tenant->domain ?? '', $body);
+                        $body = str_replace('{company_phone_number}', $tenant->phone ?? '', $body);
+                        $body = str_replace('{company_phone}', $tenant->phone ?? '', $body);
 
                         $fullName = trim($lead->first_name . ' ' . ($lead->last_name ?? ''));
                         
-                        $response = Http::withoutVerifying()
-                            ->withHeaders(['Authorization' => 'Bearer ' . $sendgridIntegration->key])
+                        $htmlContent = view('emails.layout', [
+                            'subject' => $subject,
+                            'body' => $body,
+                            'company_name' => $tenant->company ?? 'Our Company',
+                            'company_domain' => $tenant->domain ?? '',
+                            'company_phone' => $tenant->phone ?? ''
+                        ])->render();
+
+                        $response = Http::withHeaders(['Authorization' => 'Bearer ' . $sendgridIntegration->key])
                             ->post('https://api.sendgrid.com/v3/mail/send', [
                                 'personalizations' => [
                                     [
@@ -504,7 +546,11 @@ Service Type: {$serviceType}";
                                 ],
                                 'from' => ['email' => $fromEmail, 'name' => $companyName],
                                 'content' => [
-                                    ['type' => 'text/plain', 'value' => $body]
+                                    ['type' => 'text/html', 'value' => $htmlContent]
+                                ],
+                                'tracking_settings' => [
+                                    'click_tracking' => ['enable' => false, 'enable_text' => false],
+                                    'open_tracking'  => ['enable' => false]
                                 ]
                             ]);
 

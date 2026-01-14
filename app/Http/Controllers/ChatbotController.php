@@ -17,11 +17,13 @@ class ChatbotController extends Controller
 {
 public function handleMessage(Request $request)
 {
+    set_time_limit(120);
     $request->validate([
         'agent_id' => 'required|integer',
         'session_id' => 'required|string',
         'ip_address' => 'sometimes|ip',
         'message' => 'required|string',
+        'timezone' => 'sometimes|string',
     ]);
 
   $tenant = Helper::tenant();
@@ -83,7 +85,8 @@ In the meantime, feel free to reach out via phone or email! 😊"
     ->setTenantContext($apiKey, $tenant->id)
     ->setTenantPrompt($tenant->chatbot_prompt)
     ->setCustomQuestions($tenant->chatbot_questions ?? [])
-    ->setServiceTypes($serviceTypes);
+    ->setServiceTypes($serviceTypes)
+    ->setVisitorTimezone($request->timezone ?? 'Asia/Karachi');
 
 
 
@@ -102,11 +105,13 @@ In the meantime, feel free to reach out via phone or email! 😊"
 }
 public function handleMessagePublic(Request $request)
     {
+        set_time_limit(120);
         $request->validate([
             'agent_id' => 'required|integer',
             'session_id' => 'required|string',
             'ip_address' => 'sometimes|ip',
             'message' => 'required|string',
+            'timezone' => 'sometimes|string',
         ]);
 
         $tenantAgent = TenantAgent::find($request->agent_id);
@@ -118,7 +123,7 @@ public function handleMessagePublic(Request $request)
         if (!$tenant) {
             return response()->json(['reply' => 'Tenant not found for this agent'], 404);
         }
-         $serviceTypes = ServiceType::where('tenant_id', $tenantAgent->id)
+         $serviceTypes = ServiceType::where('tenant_id', $tenant->id)
           ->select('id', 'name')
           ->get();
 
@@ -140,7 +145,8 @@ public function handleMessagePublic(Request $request)
             ->setTenantContext($apiKey, $tenant->id)
             ->setTenantPrompt($tenant->chatbot_prompt)
             ->setCustomQuestions($tenant->chatbot_questions ?? [])
-            ->setServiceTypes($serviceTypes);
+            ->setServiceTypes($serviceTypes)
+            ->setVisitorTimezone($request->timezone ?? 'Asia/Karachi');
 
         $reply = $agent->handleMessage($request->message);
 
@@ -185,6 +191,7 @@ public function handleMessagePublic(Request $request)
             'agent_id' => $agentId,
             'session_id' => $sessionId,
             'ip_address' => $ipAddress,
+            'company'    => $tenant->company,
         ]);
     }
    // ChatbotController.php

@@ -36,8 +36,7 @@ public function updateGoogle(Request $request)
     $client->setClientId(env('GOOGLE_CLIENT_ID'));
     $client->setClientSecret(env('GOOGLE_CLIENT_SECRET'));
     $client->setRedirectUri(env('GOOGLE_REDIRECT_URI'));
-    // Disable SSL verification for local development
-    $client->setHttpClient(new \GuzzleHttp\Client(['verify' => false]));
+    // $client->setHttpClient(new \GuzzleHttp\Client(['verify' => false]));
     $client->setAccessType('offline'); 
     $client->setScopes(['https://www.googleapis.com/auth/calendar']);
 
@@ -297,7 +296,7 @@ public function updateOutlook(Request $request)
 
     $tenant_agent = TenantAgent::where('tenant_id', Helper::tenant()->id)->first();
 
-    $response = Http::withoutVerifying()->asForm()->post(
+    $response = Http::asForm()->post(
         'https://login.microsoftonline.com/common/oauth2/v2.0/token',
         [
             'client_id' => env('OUTLOOK_CLIENT_ID'),
@@ -390,7 +389,7 @@ public function updateSendgrid(Request $request)
 
     // Optional: Test the API key (recommended)
     try {
-        $response = Http::withoutVerifying()->withHeaders([
+        $response = Http::withHeaders([
             'Authorization' => 'Bearer ' . $request->key,
         ])->get('https://api.sendgrid.com/v3/user/profile');
 

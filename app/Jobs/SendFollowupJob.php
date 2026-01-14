@@ -12,8 +12,7 @@ use App\Models\TenantAgentIntegration;
 use App\Models\TenantAgent;
 use App\Helper;
 use Twilio\Rest\Client;
-use SendGrid;
-use SendGrid\Mail\Mail;
+
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
 
@@ -41,8 +40,7 @@ class SendFollowupJob implements ShouldQueue
 
         if ($twilioIntegration && $lead->phone) {
             try {
-                $guzzleClient = new \GuzzleHttp\Client(['verify' => false]);
-                $client = new Client($twilioIntegration->key, $twilioIntegration->secret, null, null, new \Twilio\Http\GuzzleClient($guzzleClient));
+                $client = new Client($twilioIntegration->key, $twilioIntegration->secret, null, null);
                 $numbers = $client->incomingPhoneNumbers->read();
                 $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
 
@@ -50,13 +48,17 @@ class SendFollowupJob implements ShouldQueue
                     ->where('type', 'followup')
                     ->first();
 
-                $defaultBody = "Hi {first_name},We are following up on your interest in our services";
+                $defaultBody = "Hi {first_name}, {company_name} here following up. Are you still interested in our services?";
 
                 $body = $template ? $template->message : $defaultBody;
 
                 $body = str_replace('{first_name}', $lead->first_name, $body);
                 $body = str_replace('{status}', $lead->status, $body);
                 $body = str_replace('{note}', $this->followup->note ?? '', $body);
+                $body = str_replace('{company_name}', $tenant->company ?? '', $body);
+                $body = str_replace('{company_domain}', $tenant->domain ?? '', $body);
+                $body = str_replace('{company_phone_number}', $tenant->phone ?? '', $body);
+                $body = str_replace('{company_phone}', $tenant->phone ?? '', $body);
 
                 $client->messages->create($lead->phone, [
                     'from' => $fromNumber,
@@ -92,22 +94,42 @@ class SendFollowupJob implements ShouldQueue
                     ->first();
 
                 $defaultSubject = "Follow-up";
-                $defaultBody = "Hi {first_name}, we are following up on your interest in our services.";
+                $defaultBody = "Hi {first_name},\n\n{company_name} here. We are following up on your interest in our services.\n\nBest,\n{company_name}\n{company_domain}";
 
                 $subject = $template ? $template->subject : $defaultSubject;
                 $body = $template ? $template->message : $defaultBody;
 
-                $subject = str_replace('{status}', $lead->status, $subject);
-                $body = str_replace('{first_name}', $lead->first_name, $body);
-                $body = str_replace('{status}', $lead->status, $body);
-                $body = str_replace('{note}', $this->followup->note ?? '', $body);
+                // Variables for replacement
+                $firstName = $lead->first_name;
+                $status = $lead->status;
+                $note = $this->followup->note ?? '';
+                $companyName = $tenant->company ?? '';
+                $companyDomain = $tenant->domain ?? '';
+                $companyPhone = $tenant->phone ?? '';
+
+                // Replacement in body
+                $body = str_replace('{first_name}', $firstName, $body);
+                $body = str_replace('{status}', $status, $body);
+                $body = str_replace('{note}', $note, $body);
+                $body = str_replace('{company_name}', $companyName, $body);
+                $body = str_replace('{company_domain}', $companyDomain, $body);
+                $body = str_replace('{company_phone_number}', $companyPhone, $body);
+                $body = str_replace('{company_phone}', $companyPhone, $body);
+
+                // Replacement in subject
+                $subject = str_replace('{first_name}', $firstName, $subject);
+                $subject = str_replace('{status}', $status, $subject);
+                $subject = str_replace('{note}', $note, $subject);
+                $subject = str_replace('{company_name}', $companyName, $subject);
+                $subject = str_replace('{company_domain}', $companyDomain, $subject);
+                $subject = str_replace('{company_phone_number}', $companyPhone, $subject);
+                $subject = str_replace('{company_phone}', $companyPhone, $subject);
 
                 $fromEmail = $sendgridIntegration->from_email
                     ?? 'no-reply@yourdefault.com';
                 $fullName = $lead->first_name . ' ' . ($lead->last_name ?? '');
 
-                $response = Http::withoutVerifying()
-                    ->withHeaders(['Authorization' => 'Bearer ' . ($sendgridIntegration->key ?? env('SENDGRID_API_KEY'))])
+                $response = Http::withHeaders(['Authorization' => 'Bearer ' . ($sendgridIntegration->key ?? env('SENDGRID_API_KEY'))])
                     ->post('https://api.sendgrid.com/v3/mail/send', [
                         'personalizations' => [
                             [
@@ -115,12 +137,21 @@ class SendFollowupJob implements ShouldQueue
                                 'subject' => $subject,
                             ]
                         ],
-                        'from' => ['email' => $fromEmail, 'name' => $tenant->company ?? 'Your Company'],
+                        'from' => ['email' => $fromEmail, 'name' => $companyName],
                         'content' => [
-                            ['type' => 'text/plain', 'value' => $body]
+                            ['type' => 'text/html', 'value' => view('emails.layout', [
+                                'subject' => $subject,
+                                'body' => $body,
+                                'company_name' => $tenant->company ?? 'Our Company',
+                                'company_domain' => $tenant->domain ?? '',
+                                'company_phone' => $tenant->phone ?? ''
+                            ])->render()]
+                        ],
+                        'tracking_settings' => [
+                            'click_tracking' => ['enable' => false, 'enable_text' => false],
+                            'open_tracking'  => ['enable' => false]
                         ]
                     ]);
-
                 if ($response->successful()) {
                     Log::info('✅ FOLLOWUP EMAIL SENT', [
                         'lead_id' => $lead->id,

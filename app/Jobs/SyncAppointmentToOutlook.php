@@ -59,11 +59,11 @@ class SyncAppointmentToOutlook implements ShouldQueue
             ],
             'start' => [
                 'dateTime' => $appointment->start_time->toIso8601String(),
-                'timeZone' => 'Asia/Karachi',
+                'timeZone' => config('app.timezone', 'UTC'),
             ],
             'end' => [
                 'dateTime' => $appointment->end_time->toIso8601String(),
-                'timeZone' => 'Asia/Karachi',
+                'timeZone' => config('app.timezone', 'UTC'),
             ],
         ];
 
@@ -77,6 +77,7 @@ class SyncAppointmentToOutlook implements ShouldQueue
                     );
             } else {
                 // ➕ Create event
+                Log::info('Outlook Sync: Attempting to create event', ['payload' => $eventPayload]);
                 $response = Http::withToken($accessToken)
                     ->post('https://graph.microsoft.com/v1.0/me/events', $eventPayload);
 
@@ -84,10 +85,14 @@ class SyncAppointmentToOutlook implements ShouldQueue
                     $appointment->update([
                         'outlook_event_id' => $response->json('id'),
                     ]);
+                    Log::info('Outlook Calendar synced successfully', ['appointment_id' => $appointment->id]);
+                } else {
+                    Log::error('Outlook Sync: Create event failed', [
+                        'status' => $response->status(),
+                        'response' => $response->body()
+                    ]);
                 }
             }
-
-            Log::info('Outlook Calendar synced', ['appointment_id' => $appointment->id]);
 
         } catch (\Exception $e) {
             Log::error('Outlook Sync failed', [

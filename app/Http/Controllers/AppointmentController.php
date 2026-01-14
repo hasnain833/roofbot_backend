@@ -16,8 +16,7 @@ use App\Models\TenantSmsTemplate;
 use App\Models\TenantAgent;
 use App\Models\Message;
 use App\Models\TenantEmailTemplate;
-use SendGrid\Mail\Mail;
-use SendGrid;
+
 
 class AppointmentController extends Controller
 {
@@ -75,12 +74,16 @@ class AppointmentController extends Controller
                         ->where('type', 'appointment')
                         ->first();
 
-                    $defaultBody = "Hi {first_name}, your appointment for {service_type} is scheduled on {date_time}. See you soon!";
+                    $defaultBody = "Hi {first_name}, your appointment for {service_type} with {company_name} is scheduled on {date_time}. See you soon!";
                     $body = $template?->message ?? $defaultBody;
 
                     $body = str_replace('{first_name}', $lead->first_name, $body);
                     $body = str_replace('{service_type}', $appointment->service_type ?? 'our services', $body);
                     $body = str_replace('{date_time}', Carbon::parse($appointment->start_time)->format('M d, Y h:i A'), $body);
+                    $body = str_replace('{company_name}', $tenant->company ?? '', $body);
+                    $body = str_replace('{company_domain}', $tenant->domain ?? '', $body);
+                    $body = str_replace('{company_phone_number}', $tenant->phone ?? '', $body);
+                    $body = str_replace('{company_phone}', $tenant->phone ?? '', $body);
 
                     $client->messages->create($lead->phone, [
                         'from' => $fromNumber,
@@ -114,16 +117,40 @@ class AppointmentController extends Controller
                         ->first();
 
                     $defaultSubject = 'Your Appointment is Confirmed';
-                    $defaultBody = "Hi {first_name},\n\nYour appointment for {service_type} is scheduled on {date_time}. See you soon!";
+                    $defaultBody = "Hi {first_name},\n\nYour appointment for {service_type} with {company_name} is scheduled on {date_time}. See you soon!\n\nContact: {company_phone_number}";
 
                     $subject = $template?->subject ?? $defaultSubject;
                     $body = $template?->message ?? $defaultBody;
 
-                    $body = str_replace('{first_name}', $lead->first_name, $body);
-                    $body = str_replace('{service_type}', $appointment->service_type ?? 'our services', $body);
-                    $body = str_replace('{date_time}', Carbon::parse($appointment->start_time)->format('M d, Y h:i A'), $body);
+                    // Variables
+                    $firstName = $lead->first_name;
+                    $serviceType = $appointment->service_type ?? 'our services';
+                    $dateTime = Carbon::parse($appointment->start_time)->format('M d, Y h:i A');
+                    $companyName = $tenant->company ?? '';
+                    $companyDomain = $tenant->domain ?? '';
+                    $companyPhone = $tenant->phone ?? '';
+
+                    // Replace in body
+                    $body = str_replace('{first_name}', $firstName, $body);
+                    $body = str_replace('{service_type}', $serviceType, $body);
+                    $body = str_replace('{date_time}', $dateTime, $body);
+                    $body = str_replace('{company_name}', $companyName, $body);
+                    $body = str_replace('{company_domain}', $companyDomain, $body);
+                    $body = str_replace('{company_phone_number}', $companyPhone, $body);
+                    $body = str_replace('{company_phone}', $companyPhone, $body);
+
+                    // Replace in subject
+                    $subject = str_replace('{first_name}', $firstName, $subject);
+                    $subject = str_replace('{service_type}', $serviceType, $subject);
+                    $subject = str_replace('{date_time}', $dateTime, $subject);
+                    $subject = str_replace('{company_name}', $companyName, $subject);
+                    $subject = str_replace('{company_domain}', $companyDomain, $subject);
+                    $subject = str_replace('{company_phone_number}', $companyPhone, $subject);
+                    $subject = str_replace('{company_phone}', $companyPhone, $subject);
 
                     $email = new Mail();
+                    $email->setClickTracking(false, false);
+                    $email->setOpenTracking(false);
 
                     $fromEmail = $sendgridIntegration->from_email
                         ?? 'no-reply@yourdefault.com'; 
@@ -135,18 +162,49 @@ class AppointmentController extends Controller
                     $email->setSubject($subject);
 
                     $fullName = trim($lead->first_name . ' ' . ($lead->last_name ?? ''));
-                    $email->addTo($lead->email, $fullName);
-                    $email->addContent("text/plain", $body);
+                    
+                    $htmlContent = view('emails.layout', [
+                        'subject' => $subject,
+                        'body' => $body,
+                        'company_name' => $tenant->company ?? 'Our Company',
+                        'company_domain' => $tenant->domain ?? '',
+                        'company_phone' => $tenant->phone ?? ''
+                    ])->render();
 
-                    $sendgrid = new SendGrid($sendgridIntegration->key);
-                    $response = $sendgrid->send($email);
+                    $response = Http::withHeaders(['Authorization' => 'Bearer ' . $sendgridIntegration->key])
+                        ->post('https://api.sendgrid.com/v3/mail/send', [
+                            'personalizations' => [
+                                [
+                                    'to' => [['email' => $lead->email, 'name' => $fullName]],
+                                    'subject' => $subject,
+                                ]
+                            ],
+                            'from' => [
+                                'email' => $fromEmail, 
+                                'name' => $tenant->company ?? 'Your Company'
+                            ],
+                            'content' => [
+                                ['type' => 'text/html', 'value' => $htmlContent]
+                            ],
+                            'tracking_settings' => [
+                                'click_tracking' => ['enable' => false, 'enable_text' => false],
+                                'open_tracking'  => ['enable' => false]
+                            ]
+                        ]);
 
-                    \Log::info('Appointment email sent', [
-                        'appointment_id' => $appointment->id,
-                        'to' => $lead->email,
-                        'status_code' => $response?->statusCode()
-
-                    ]);
+                    if ($response->successful()) {
+                        \Log::info('Appointment email sent', [
+                            'appointment_id' => $appointment->id,
+                            'to' => $lead->email,
+                            'status_code' => $response->status()
+                        ]);
+                    } else {
+                        \Log::error('Appointment email failed - SendGrid Error', [
+                            'appointment_id' => $appointment->id,
+                            'status' => $response->status(),
+                            'body' => $response->body()
+                        ]);
+                    }
                 } catch (\Exception $e) {
                     \Log::error('Appointment email failed: ' . $e->getMessage(), [
                         'appointment_id' => $appointment->id,

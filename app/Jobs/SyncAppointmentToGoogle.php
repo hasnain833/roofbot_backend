@@ -49,15 +49,25 @@ class SyncAppointmentToGoogle implements ShouldQueue
         }
 
         try {
+            $meta = json_decode($integration->meta ?? '{}', true);
+
             $client = new Client();
             $client->setClientId(env('GOOGLE_CLIENT_ID'));
             $client->setClientSecret(env('GOOGLE_CLIENT_SECRET'));
             $client->setAccessType('offline');
             $client->setAccessToken([
                 'access_token' => $integration->key,
-            'expires_in'   => $meta['expires_in'] ?? 3600,
-            'created'      => $meta['created'] ?? time(),
- ]);
+                'expires_in'   => $meta['expires_in'] ?? 3600,
+                'created'      => $meta['created'] ?? time(),
+            ]);
+
+            if ($client->isAccessTokenExpired()) {
+                if (!$integration->secret) {
+                    \Log::error('Google Sync Error: Access token expired and no refresh token available for tenant agent ID: ' . $tenantAgent->id . '. User needs to reconnect Google account.');
+                    return;
+                }
+                \Log::info('Google Sync: Refreshing expired access token.');
+            }
 
 
             // Refresh token if expired
@@ -86,8 +96,8 @@ $integration->update([
             $eventData = [
                 'summary' => $appointment->title,
                 'description' => $appointment->description ?? '',
-                'start' => ['dateTime' => $appointment->start_time->toRfc3339String(), 'timeZone' => 'Europe/London'],
-                'end' => ['dateTime' => $appointment->end_time->toRfc3339String(), 'timeZone' => 'Europe/London'],
+                'start' => ['dateTime' => $appointment->start_time->toRfc3339String(), 'timeZone' => config('app.timezone', 'UTC')],
+                'end' => ['dateTime' => $appointment->end_time->toRfc3339String(), 'timeZone' => config('app.timezone', 'UTC')],
             ];
 
             if ($this->isUpdate && $appointment->google_event_id) {

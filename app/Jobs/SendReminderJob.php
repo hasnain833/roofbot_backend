@@ -13,8 +13,7 @@ use App\Models\TenantAgent;
 use Carbon\Carbon;
 use App\Helper;
 use Twilio\Rest\Client;
-use SendGrid;
-use SendGrid\Mail\Mail;
+
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
 
@@ -43,8 +42,7 @@ class SendReminderJob implements ShouldQueue
 
     if ($twilioIntegration && $lead->phone) {
         try {
-            $guzzleClient = new \GuzzleHttp\Client(['verify' => false]);
-            $client = new Client($twilioIntegration->key, $twilioIntegration->secret, null, null, new \Twilio\Http\GuzzleClient($guzzleClient));
+            $client = new Client($twilioIntegration->key, $twilioIntegration->secret, null, null);
             $numbers = $client->incomingPhoneNumbers->read();
             $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
 
@@ -52,13 +50,17 @@ class SendReminderJob implements ShouldQueue
                 ->where('type', 'reminder')
                 ->first();
 
-            $defaultBody = "Reminder: Your appointment is in 24 hours on {date_time}. Title: {appointment_title}.";
+            $defaultBody = "Reminder: Your appointment with {company_name} is in 24 hours on {date_time}. Title: {appointment_title}.";
 
             $body = $template ? $template->message : $defaultBody;
 
             $body = str_replace('{first_name}', $lead->first_name, $body);
             $body = str_replace('{date_time}', Carbon::parse($appointment->start_time)->format('M d, Y h:i A'), $body);
             $body = str_replace('{appointment_title}', $appointment->title, $body);
+            $body = str_replace('{company_name}', $tenant->company ?? '', $body);
+            $body = str_replace('{company_domain}', $tenant->domain ?? '', $body);
+            $body = str_replace('{company_phone_number}', $tenant->phone ?? '', $body);
+            $body = str_replace('{company_phone}', $tenant->phone ?? '', $body);
 
             $client->messages->create($lead->phone, [
                 'from' => $fromNumber,
@@ -95,20 +97,41 @@ class SendReminderJob implements ShouldQueue
                 ->first();
 
             $defaultSubject = "Appointment Reminder: 24 Hours Away";
-            $defaultBody = "Hi {first_name},\n\nThis is a friendly reminder that your appointment is in 24 hours on {date_time}. Title: {appointment_title}.";
+            $defaultBody = "Hi {first_name},\n\nThis is a friendly reminder that your appointment with {company_name} is in 24 hours on {date_time}.\nTitle: {appointment_title}.\n\nSee you soon!";
 
             $subject = $template ? $template->subject : $defaultSubject;
             $body = $template ? $template->message : $defaultBody;
 
-            $body = str_replace('{first_name}', $lead->first_name, $body);
-            $body = str_replace('{date_time}', Carbon::parse($appointment->start_time)->format('M d, Y h:i A'), $body);
-            $body = str_replace('{appointment_title}', $appointment->title, $body);
+            // Variables for replacement
+            $firstName = $lead->first_name;
+            $dateTime = Carbon::parse($appointment->start_time)->format('M d, Y h:i A');
+            $appointmentTitle = $appointment->title;
+            $companyName = $tenant->company ?? '';
+            $companyDomain = $tenant->domain ?? '';
+            $companyPhone = $tenant->phone ?? '';
+
+            // Replacement in body
+            $body = str_replace('{first_name}', $firstName, $body);
+            $body = str_replace('{date_time}', $dateTime, $body);
+            $body = str_replace('{appointment_title}', $appointmentTitle, $body);
+            $body = str_replace('{company_name}', $companyName, $body);
+            $body = str_replace('{company_domain}', $companyDomain, $body);
+            $body = str_replace('{company_phone_number}', $companyPhone, $body);
+            $body = str_replace('{company_phone}', $companyPhone, $body);
+
+            // Replacement in subject
+            $subject = str_replace('{first_name}', $firstName, $subject);
+            $subject = str_replace('{date_time}', $dateTime, $subject);
+            $subject = str_replace('{appointment_title}', $appointmentTitle, $subject);
+            $subject = str_replace('{company_name}', $companyName, $subject);
+            $subject = str_replace('{company_domain}', $companyDomain, $subject);
+            $subject = str_replace('{company_phone_number}', $companyPhone, $subject);
+            $subject = str_replace('{company_phone}', $companyPhone, $subject);
 
             $fromEmail = $sendgridIntegration->from_email ?? 'no-reply@yourdefault.com';
             $fullName = $lead->first_name . ' ' . ($lead->last_name ?? '');
 
-            $response = Http::withoutVerifying()
-                ->withHeaders(['Authorization' => 'Bearer ' . ($sendgridIntegration->key ?? env('SENDGRID_API_KEY'))])
+            $response = Http::withHeaders(['Authorization' => 'Bearer ' . ($sendgridIntegration->key ?? env('SENDGRID_API_KEY'))])
                 ->post('https://api.sendgrid.com/v3/mail/send', [
                     'personalizations' => [
                         [
@@ -116,9 +139,19 @@ class SendReminderJob implements ShouldQueue
                             'subject' => $subject,
                         ]
                     ],
-                    'from' => ['email' => $fromEmail, 'name' => $tenant->company ?? 'Your Company'],
+                    'from' => ['email' => $fromEmail, 'name' => $companyName],
                     'content' => [
-                        ['type' => 'text/plain', 'value' => $body]
+                        ['type' => 'text/html', 'value' => view('emails.layout', [
+                            'subject' => $subject,
+                            'body' => $body,
+                            'company_name' => $tenant->company ?? 'Our Company',
+                            'company_domain' => $tenant->domain ?? '',
+                            'company_phone' => $tenant->phone ?? ''
+                        ])->render()]
+                    ],
+                    'tracking_settings' => [
+                        'click_tracking' => ['enable' => false, 'enable_text' => false],
+                        'open_tracking'  => ['enable' => false]
                     ]
                 ]);
 
