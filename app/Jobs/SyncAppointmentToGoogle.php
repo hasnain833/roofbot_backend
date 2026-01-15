@@ -96,8 +96,8 @@ $integration->update([
             $eventData = [
                 'summary' => $appointment->title,
                 'description' => $appointment->description ?? '',
-                'start' => ['dateTime' => $appointment->start_time->toRfc3339String(), 'timeZone' => config('app.timezone', 'UTC')],
-                'end' => ['dateTime' => $appointment->end_time->toRfc3339String(), 'timeZone' => config('app.timezone', 'UTC')],
+                'start' => ['dateTime' => $appointment->start_time->toRfc3339String(), 'timeZone' => 'UTC'],
+                'end' => ['dateTime' => $appointment->end_time->toRfc3339String(), 'timeZone' => 'UTC'],
             ];
 
             if ($this->isUpdate && $appointment->google_event_id) {

@@ -53,12 +53,26 @@ class SendFollowupJob implements ShouldQueue
                 $body = $template ? $template->message : $defaultBody;
 
                 $body = str_replace('{first_name}', $lead->first_name, $body);
+                $body = str_replace('{last_name}', $lead->last_name ?? '', $body);
+                $body = str_replace('{service_type}', $lead->service_type_name ?? 'our services', $body);
                 $body = str_replace('{status}', $lead->status, $body);
                 $body = str_replace('{note}', $this->followup->note ?? '', $body);
                 $body = str_replace('{company_name}', $tenant->company ?? '', $body);
                 $body = str_replace('{company_domain}', $tenant->domain ?? '', $body);
                 $body = str_replace('{company_phone_number}', $tenant->phone ?? '', $body);
                 $body = str_replace('{company_phone}', $tenant->phone ?? '', $body);
+
+                // Date Time support in case it's in the template
+                $lastAppointment = \App\Models\Appointment::where('lead_id', $lead->id)->latest()->first();
+                if ($lastAppointment) {
+                    $visitorTz = $this->getLeadTimezone($lead);
+                    $dateTimeFormatted = Carbon::parse($lastAppointment->start_time, 'UTC')->setTimezone($visitorTz)->format('M d, Y h:i A');
+                    $body = str_replace('{date_time}', $dateTimeFormatted, $body);
+                    $body = str_replace('{appointment_title}', $lastAppointment->title, $body);
+                } else {
+                    $body = str_replace('{date_time}', '', $body);
+                    $body = str_replace('{appointment_title}', '', $body);
+                }
 
                 $client->messages->create($lead->phone, [
                     'from' => $fromNumber,
@@ -179,5 +193,22 @@ class SendFollowupJob implements ShouldQueue
         }
 
         $this->followup->update(['done' => true]);
+    }
+
+    private function getLeadTimezone($lead): string
+    {
+        // Simple country-to-timezone mapping for common countries
+        $countryTimezones = [
+            'Pakistan' => 'Asia/Karachi',
+            'United States' => 'America/New_York',
+            'USA' => 'America/New_York',
+            'United Kingdom' => 'Europe/London',
+            'UK' => 'Europe/London',
+            'Canada' => 'America/Toronto',
+            'Australia' => 'Australia/Sydney',
+            'India' => 'Asia/Kolkata',
+        ];
+
+        return $countryTimezones[$lead->country] ?? 'UTC';
     }
 }

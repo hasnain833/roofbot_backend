@@ -59,11 +59,11 @@ class SyncAppointmentToOutlook implements ShouldQueue
             ],
             'start' => [
                 'dateTime' => $appointment->start_time->toIso8601String(),
-                'timeZone' => config('app.timezone', 'UTC'),
+                'timeZone' => 'UTC',
             ],
             'end' => [
                 'dateTime' => $appointment->end_time->toIso8601String(),
-                'timeZone' => config('app.timezone', 'UTC'),
+                'timeZone' => 'UTC',
             ],
         ];
 

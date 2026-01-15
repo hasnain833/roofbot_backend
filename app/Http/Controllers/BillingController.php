@@ -47,7 +47,7 @@ class BillingController extends Controller
                 'real_status' => $subscription->stripe_status,
                 'is_canceled' => $subscription->canceled(),
                 'is_on_grace_period' => $subscription->onGracePeriod(),
-                'current_period_end' => $stripeSub->current_period_end
+                'current_period_end' => isset($stripeSub->current_period_end)
                     ? Carbon::createFromTimestamp($stripeSub->current_period_end)->format('Y-m-d H:i:s')
                     : null,
                 'trial_ends_at' => $subscription->trial_ends_at
@@ -141,8 +141,9 @@ class BillingController extends Controller
                 ->create();
 
             $user->plan_id = $plan->id;
-            $user->current_period_end = $subscription->asStripeSubscription()->current_period_end
-                ? Carbon::createFromTimestamp($subscription->asStripeSubscription()->current_period_end)
+            $stripeSub = $subscription->asStripeSubscription();
+            $user->current_period_end = isset($stripeSub->current_period_end)
+                ? Carbon::createFromTimestamp($stripeSub->current_period_end)
                 : null;
             $user->subscription_status = $subscription->stripe_status;
             $user->save();

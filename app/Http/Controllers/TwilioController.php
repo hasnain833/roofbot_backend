@@ -291,80 +291,105 @@ Highlight intent, questions, tone, and next steps:\n\n{$chatText}";
     }
     public function handleInboundCall(Request $request)
     {
-        Log::info('📞 Inbound call received:', $request->all());
+        try {
+            Log::info('📞 Inbound call received:', $request->all());
 
-        $from = $request->input('From'); // Lead's phone
-        $to = $request->input('To');     // Twilio number called
+            $from = $request->input('From'); 
+            $to = $request->input('To');     
 
-        $integration = null;
-        $integrations = TenantAgentIntegration::where('provider', 'twilio')->get();
-        foreach ($integrations as $item) {
-            try {
-                $client = new Client($item->key, $item->secret);
-                $numbers = $client->incomingPhoneNumbers->read();
-                foreach ($numbers as $num) {
-                    if ($num->phoneNumber === $to) {
-                        $integration = $item;
-                        break 2;
-                    }
+            $integration = null;
+            $integrations = TenantAgentIntegration::where('provider', 'twilio')->get();
+            
+            Log::info('Checking Twilio integrations for voice match', ['count' => $integrations->count(), 'target_to' => $to]);
+
+            foreach ($integrations as $item) {
+                $meta = json_decode($item->meta ?? '{}', true);
+                if (isset($meta['phone_number']) && $meta['phone_number'] === $to) {
+                    $integration = $item;
+                    break;
                 }
-            } catch (\Exception $e) {
-                Log::warning("Failed checking Twilio account ({$item->id}): " . $e->getMessage());
+
+                try {
+                    $client = new Client($item->key, $item->secret);
+                    $numbers = $client->incomingPhoneNumbers->read();
+                    foreach ($numbers as $num) {
+                        if ($num->phoneNumber === $to) {
+                            $integration = $item;
+                            $item->update(['meta' => json_encode(array_merge($meta, ['phone_number' => $to]))]);
+                            break 2;
+                        }
+                    }
+                } catch (\Exception $e) {
+                    Log::warning("Failed checking Twilio account ({$item->id}): " . $e->getMessage());
+                }
             }
-        }
 
-        if (!$integration) {
-            Log::warning("❌ No Twilio integration found for incoming number: $to");
+            if (!$integration) {
+                Log::warning("❌ No Twilio integration found for incoming number: $to");
+                $response = new VoiceResponse();
+                $response->say('Sorry, this number is not configured.');
+                $response->hangup();
+                return response((string)$response)->header('Content-Type', 'text/xml');
+            }
+
+            $tenantAgent = TenantAgent::find($integration->tenant_agent_id);
+            if (!$tenantAgent) {
+                Log::warning("❌ No tenant agent found for integration ID: {$integration->id}");
+                $response = new VoiceResponse();
+                $response->say('Sorry, we could not connect your call.');
+                $response->hangup();
+                return response((string)$response)->header('Content-Type', 'text/xml');
+            }
+
+            $lead = Lead::where('phone', $from)
+                ->where('tenant_id', $tenantAgent->tenant_id)
+                ->first();
+
+            if (!$lead) {
+                Log::info("ℹ️ Inbound call from unknown number $from (tenant {$tenantAgent->tenant_id}). Playing welcome message.");
+                $response = new VoiceResponse();
+                $response->say("Thanks for calling " . ($tenantAgent->tenant->company ?? 'us') . ". To better assist you, please hang up and send us a text message with your name, and our team will get right back to you. Goodbye!");
+                $response->hangup();
+                return response((string)$response)->header('Content-Type', 'text/xml');
+            }
+
+            $tenant = $tenantAgent->tenant;
+            $tenantPhone = $tenant->phone;
+
+            if (!$tenantPhone) {
+                Log::warning("❌ No tenant phone found for tenant ID: {$tenant->id}");
+                $response = new VoiceResponse();
+                $response->say('Sorry, we are unable to connect at this time. Please text us.');
+                $response->hangup();
+                return response((string)$response)->header('Content-Type', 'text/xml');
+            }
+
+            // Forward call to tenant
+            $appUrl = rtrim(env('APP_URL'), '/');
+
             $response = new VoiceResponse();
-            $response->say('Sorry, this number is not configured.');
-            $response->hangup();
-            return response($response)->header('Content-Type', 'text/xml');
-        }
+            $dial = $response->dial($tenantPhone, [
+                'timeout' => 25,
+                'callerId' => $to,
+                'statusCallback' => $appUrl . '/api/twilio/voice-status',
+                'statusCallbackMethod' => 'POST',
+                'statusCallbackEvent' => 'no-answer busy failed completed',
+            ]);
 
-        $tenantAgent = TenantAgent::find($integration->tenant_agent_id);
-        if (!$tenantAgent) {
-            Log::warning("❌ No tenant agent found for integration ID: {$integration->id}");
+            $response->say('Sorry, we missed your call. How we can help you today.');
+
+            return response((string)$response)->header('Content-Type', 'text/xml');
+
+        } catch (\Exception $e) {
+            Log::error("🚨 Critical Error in handleInboundCall: " . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+                'request' => $request->all()
+            ]);
             $response = new VoiceResponse();
-            $response->say('Sorry, we could not connect your call.');
+            $response->say('Sorry, an internal error occurred. Our team has been notified.');
             $response->hangup();
-            return response($response)->header('Content-Type', 'text/xml');
+            return response((string)$response)->header('Content-Type', 'text/xml');
         }
-
-        $lead = Lead::where('phone', $from)
-            ->where('tenant_id', $tenantAgent->tenant_id)
-            ->first();
-
-        if (!$lead) {
-            Log::warning("❌ No lead found for number: $from (tenant {$tenantAgent->tenant_id})");
-            $response = new VoiceResponse();
-            $response->say('Sorry, we could not find your information. Please text us instead.');
-            $response->hangup();
-            return response($response)->header('Content-Type', 'text/xml');
-        }
-
-        $tenant = $tenantAgent->tenant;
-        $tenantPhone = $tenant->phone;
-        if (!$tenantPhone) {
-            Log::warning("❌ No tenant phone found for tenant ID: {$tenant->id}");
-            $response = new VoiceResponse();
-            $response->say('Sorry, we are unable to connect at this time. Please text us.');
-            $response->hangup();
-            return response($response)->header('Content-Type', 'text/xml');
-        }
-
-        // Forward call to tenant
-        $response = new VoiceResponse();
-        $dial = $response->dial($tenantPhone, [
-            'timeout' => 25,
-            'callerId' => $to,
-            'statusCallback' => env('APP_URL') . '/api/twilio/voice-status',
-            'statusCallbackMethod' => 'POST',
-            'statusCallbackEvent' => ['no-answer', 'busy', 'failed', 'completed'],
-        ]);
-
-        $response->say('Sorry, we missed your call. How we can help you today.');
-
-        return response($response)->header('Content-Type', 'text/xml');
     }
     public function handleVoiceStatus(Request $request)
     {
@@ -380,12 +405,19 @@ Highlight intent, questions, tone, and next steps:\n\n{$chatText}";
             $integration = null;
             $integrations = TenantAgentIntegration::where('provider', 'twilio')->get();
             foreach ($integrations as $item) {
+                $meta = json_decode($item->meta ?? '{}', true);
+                if (isset($meta['phone_number']) && $meta['phone_number'] === $to) {
+                    $integration = $item;
+                    break;
+                }
+
                 try {
                     $client = new Client($item->key, $item->secret);
                     $numbers = $client->incomingPhoneNumbers->read();
                     foreach ($numbers as $num) {
                         if ($num->phoneNumber === $to) {
                             $integration = $item;
+                            $item->update(['meta' => json_encode(array_merge($meta, ['phone_number' => $to]))]);
                             break 2;
                         }
                     }
@@ -400,19 +432,23 @@ Highlight intent, questions, tone, and next steps:\n\n{$chatText}";
             }
 
             $tenantAgent = TenantAgent::find($integration->tenant_agent_id);
+            if (!$tenantAgent) return response()->json(['success' => false]);
+
             $lead = Lead::where('phone', $from)
                 ->where('tenant_id', $tenantAgent->tenant_id)
                 ->first();
-            $recentMissedSms = Message::where('lead_id', $lead->id)
-                ->where('text', 'like', '%sorry we missed your call%')
-                ->where('created_at', '>', now()->subMinutes(10))
-                ->exists();
-
-            if ($recentMissedSms) {
-                return response()->json(['success' => true]); 
-            }
 
             if ($lead) {
+                // Check if we already sent a missed call SMS in the last 10 mins
+                $recentMissedSms = Message::where('lead_id', $lead->id)
+                    ->where('text', 'like', '%sorry we missed your call%')
+                    ->where('created_at', '>', now()->subMinutes(10))
+                    ->exists();
+
+                if ($recentMissedSms) {
+                    return response()->json(['success' => true]); 
+                }
+
                 try {
                     $client = new Client($integration->key, $integration->secret);
                     $fromNumber = $to;

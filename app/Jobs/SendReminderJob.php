@@ -55,7 +55,11 @@ class SendReminderJob implements ShouldQueue
             $body = $template ? $template->message : $defaultBody;
 
             $body = str_replace('{first_name}', $lead->first_name, $body);
-            $body = str_replace('{date_time}', Carbon::parse($appointment->start_time)->format('M d, Y h:i A'), $body);
+            $body = str_replace('{last_name}', $lead->last_name ?? '', $body);
+            $body = str_replace('{service_type}', $lead->service_type_name ?? 'our services', $body);
+            // Deduce timezone from country or default to UTC
+            $visitorTz = $this->getLeadTimezone($lead);
+            $body = str_replace('{date_time}', Carbon::parse($appointment->start_time, 'UTC')->setTimezone($visitorTz)->format('M d, Y h:i A'), $body);
             $body = str_replace('{appointment_title}', $appointment->title, $body);
             $body = str_replace('{company_name}', $tenant->company ?? '', $body);
             $body = str_replace('{company_domain}', $tenant->domain ?? '', $body);
@@ -104,7 +108,9 @@ class SendReminderJob implements ShouldQueue
 
             // Variables for replacement
             $firstName = $lead->first_name;
-            $dateTime = Carbon::parse($appointment->start_time)->format('M d, Y h:i A');
+            // Deduce timezone from country or default to UTC
+            $visitorTz = $this->getLeadTimezone($lead);
+            $dateTime = Carbon::parse($appointment->start_time, 'UTC')->setTimezone($visitorTz)->format('M d, Y h:i A');
             $appointmentTitle = $appointment->title;
             $companyName = $tenant->company ?? '';
             $companyDomain = $tenant->domain ?? '';
@@ -185,5 +191,22 @@ class SendReminderJob implements ShouldQueue
     }
 
     $this->reminder->update(['done' => true]);
+}
+
+private function getLeadTimezone($lead): string
+{
+    // Simple country-to-timezone mapping for common countries
+    $countryTimezones = [
+        'Pakistan' => 'Asia/Karachi',
+        'United States' => 'America/New_York',
+        'USA' => 'America/New_York',
+        'United Kingdom' => 'Europe/London',
+        'UK' => 'Europe/London',
+        'Canada' => 'America/Toronto',
+        'Australia' => 'Australia/Sydney',
+        'India' => 'Asia/Kolkata',
+    ];
+
+    return $countryTimezones[$lead->country] ?? 'UTC';
 }
 }

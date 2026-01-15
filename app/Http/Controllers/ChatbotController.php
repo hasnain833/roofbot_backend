@@ -26,6 +26,12 @@ public function handleMessage(Request $request)
         'timezone' => 'sometimes|string',
     ]);
 
+    Log::info('CHATBOT handleMessage request', [
+        'message' => $request->message,
+        'timezone' => $request->timezone,
+        'all' => $request->all()
+    ]);
+
   $tenant = Helper::tenant();
 
 if (!$tenant) {
@@ -85,8 +91,12 @@ In the meantime, feel free to reach out via phone or email! 😊"
     ->setTenantContext($apiKey, $tenant->id)
     ->setTenantPrompt($tenant->chatbot_prompt)
     ->setCustomQuestions($tenant->chatbot_questions ?? [])
-    ->setServiceTypes($serviceTypes)
-    ->setVisitorTimezone($request->timezone ?? 'Asia/Karachi');
+    ->setServiceTypes($serviceTypes);
+
+    // Only overwrite if the request has a specific (non-UTC) timezone
+    if ($request->timezone && $request->timezone !== 'UTC') {
+        $agent->setVisitorTimezone($request->timezone);
+    }
 
 
 
@@ -112,6 +122,12 @@ public function handleMessagePublic(Request $request)
             'ip_address' => 'sometimes|ip',
             'message' => 'required|string',
             'timezone' => 'sometimes|string',
+        ]);
+
+        Log::info('CHATBOT handleMessagePublic request', [
+            'message' => $request->message,
+            'timezone' => $request->timezone,
+            'all' => $request->all()
         ]);
 
         $tenantAgent = TenantAgent::find($request->agent_id);
@@ -145,8 +161,11 @@ public function handleMessagePublic(Request $request)
             ->setTenantContext($apiKey, $tenant->id)
             ->setTenantPrompt($tenant->chatbot_prompt)
             ->setCustomQuestions($tenant->chatbot_questions ?? [])
-            ->setServiceTypes($serviceTypes)
-            ->setVisitorTimezone($request->timezone ?? 'Asia/Karachi');
+            ->setServiceTypes($serviceTypes);
+
+        if ($request->timezone && $request->timezone !== 'UTC') {
+            $agent->setVisitorTimezone($request->timezone);
+        }
 
         $reply = $agent->handleMessage($request->message);
 

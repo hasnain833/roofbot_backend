@@ -26,6 +26,7 @@ class LeadAgent extends Agent
     protected $contextWindowSize = 8000;
     protected $storeMeta = true;
     protected static $currentTenantId;
+    protected static $currentSessionId;
     public $tenantId;
     public $apiKey;
     protected ?string $tenantPrompt = null;
@@ -34,13 +35,64 @@ class LeadAgent extends Agent
     protected ?string $currentLeadId = null;
     protected bool $leadCreated = false;
     protected int $customAnsweredCount = 0;
-    protected string $visitorTimezone = 'UTC';
+    protected static ?string $cachedVisitorTimezone = null;
+    protected string $visitorTimezone = 'UTC'; 
 
     public function setVisitorTimezone(string $timezone): self
     {
+        Log::info('CHATBOT setVisitorTimezone called', [
+            'session_id' => $this->customSessionId,
+            'new_tz' => $timezone,
+            'old_tz' => $this->visitorTimezone
+        ]);
         $this->visitorTimezone = $timezone;
+        self::$cachedVisitorTimezone = $timezone;
         return $this;
     }
+
+    protected function resolveTimezone(): string
+    {
+        // 1. Check static property (in-memory persistence for current process)
+        if (self::$cachedVisitorTimezone) {
+            return self::$cachedVisitorTimezone;
+        }
+
+        // 2. Check cache (persistent across requests/sessions)
+        if ($this->customSessionId) {
+            $cached = \Cache::get("agent_tz_{$this->customSessionId}");
+            if ($cached) {
+                self::$cachedVisitorTimezone = $cached;
+                return $cached;
+            }
+        }
+
+        return $this->visitorTimezone;
+    }
+
+    #[Tool(description: 'Set the visitor\'s local timezone ID (IANA format, e.g., America/New_York or Asia/Karachi). Call this as soon as you identify the user\'s location from their address to sync the bot\'s clock to their reality.')]
+    public function set_visitor_timezone_context(string $timezone_id): string
+    {
+        try {
+            // Validate the timezone
+            $carbon = now()->setTimezone($timezone_id);
+            $this->visitorTimezone = $timezone_id;
+            
+            Log::info('CHATBOT set_visitor_timezone_context tool executed', [
+                'session_id' => $this->customSessionId,
+                'timezone' => $timezone_id
+            ]);
+
+            // Persist the timezone in the cache for this session
+            if ($this->customSessionId) {
+                \Cache::put("agent_tz_{$this->customSessionId}", $timezone_id, now()->addHours(2));
+            }
+
+            return "Context updated: Current visitor time is now " . $carbon->format('g:i A') . " ($timezone_id).";
+        } catch (\Exception $e) {
+            return "Error setting timezone: " . $e->getMessage();
+        }
+    }
+
 
 
 
@@ -50,7 +102,11 @@ class LeadAgent extends Agent
 
         if ($sessionId) {
             $this->customSessionId = $sessionId;
+            self::$currentSessionId = $sessionId;
+        } elseif (self::$currentSessionId) {
+            $this->customSessionId = self::$currentSessionId;
         }
+
         if (static::$currentTenantId !== null) {
             $this->tenantId = static::$currentTenantId;
         }
@@ -64,6 +120,14 @@ class LeadAgent extends Agent
 
         static::$currentTenantId = $tenantId;
         config(['laragent.providers.default.api_key' => $apiKey]);
+
+        // Restore timezone from cache if available for this session
+        if ($this->customSessionId) {
+            $cachedTz = \Cache::get("agent_tz_{$this->customSessionId}");
+            if ($cachedTz) {
+                $this->visitorTimezone = $cachedTz;
+            }
+        }
 
         return $this;
     }
@@ -87,7 +151,8 @@ class LeadAgent extends Agent
 
     public function instructions(): string
     {
-        $now = now()->setTimezone($this->visitorTimezone);
+        $tz = $this->resolveTimezone();
+        $now = now()->setTimezone($tz);
         $currentDate = $now->format('l, F j, Y');
         $currentTime = $now->format('g:i A');
         $currentYear = $now->format('Y');
@@ -109,15 +174,20 @@ class LeadAgent extends Agent
 CRITICAL: THE CURRENT YEAR IS {$currentYear}. YOU MUST BOOK ALL APPOINTMENTS FOR THE YEAR {$currentYear}.
 
 TIMEZONE CONTEXT:
-- YOUR LOCATION: {$this->visitorTimezone}
-- CURRENT LOCAL DATE: {$currentDate}
-- CURRENT LOCAL TIME: {$currentTime}
+- VISITOR TIMEZONE: {$tz}
+- CURRENT VISITOR DATE: {$currentDate}
+- CURRENT VISITOR TIME: {$currentTime}
 
-IMPORTANT: All dates and times provided by the user are in {$this->visitorTimezone} timezone. When calling the book_appointment tool, you MUST pass the user's local time exactly as a string (YYYY-MM-DD HH:mm:ss). DO NOT perform any UTC conversion yourself.
+DEBUG: Current LeadAgent instance timezone is {$tz}
 
-Example: If the user says "4pm tomorrow", and tomorrow is Jan 20, 2026:
-1. Local time is 2026-01-20 16:00:00 ({$this->visitorTimezone}).
-2. Call tool with start_time: "2026-01-20 16:00:00" and end_time: "2026-01-20 17:00:00".
+IMPORTANT: All dates and times provided by the user are relative to their location. 
+1. As soon as you gather the user's service address, you MUST identify the correct IANA timezone ID for that location (e.g., America/New_York, Europe/Paris, Africa/Cairo, Asia/Tokyo).
+2. IMMEDIATELY call `set_visitor_timezone_context` with that ID to sync your clock to the visitor's reality.
+3. When calling `book_appointment`, pass the user's local time exactly as a naive string (YYYY-MM-DD HH:mm:ss). DO NOT perform any UTC conversion yourself.
+
+Example Flow:
+User says "I'm in Chicago" -> You call set_visitor_timezone_context('America/Chicago') -> You continue the conversation.
+User says "4pm tomorrow" -> You call book_appointment with start_time: "2026-01-20 16:00:00".
 
 You are a friendly roofing intake assistant. Your job is to collect customer information for booking appointments.
 
@@ -127,7 +197,7 @@ IMPORTANT:
 
 DATA TO COLLECT (in this order):
 1. Full Name (first and last)
-2. Phone Number (Give an example, like: country code + number, e.g., 923XXXXXXXXX)
+2. Phone Number (You MUST ask the user to provide their REAL phone number. Do NOT guess or populate with a dummy number. Example: 923XXXXXXXXX)
 3. Email Address
 4. Service Type (must be one of the following):
 {$serviceTypeText}
@@ -208,19 +278,15 @@ After the lead is created and custom questions are answered, ask the customer:
 
 When user provides the date/time:
 1. Parse the date and time from their response
-2. Convert to ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ
-   Example: 'January 20 at 3pm' → 2026-01-20T15:00:00Z
-3. Calculate end time as 1 hour after start time
-4. Call book_appointment tool
+2. Call book_appointment tool with start_time (YYYY-MM-DD HH:mm:ss) and end_time (YYYY-MM-DD HH:mm:ss, usually 1 hour later).
 
 PHASE 5: CONFIRMATION & BOOKING
 ────────────────────────────────
 After booking, respond with a friendly confirmation.
 After appointment is booked, clear all data for the next customer.
 
-SERVICE TYPE RULES:
-──────────────────
 • The service_type MUST be exactly one of the tenant's service names
+• CRITICAL: Before collecting appointment time, you MUST have called `set_visitor_timezone_context` to sync your clock to the user's location.
 • Do NOT invent new services
 • Do NOT rephrase service names
 • If user mentions something similar, choose the closest matching service
@@ -285,12 +351,13 @@ PROMPT;
             ->map(fn($q, $i) => ($i + 1) . ". {$q['question']}")
             ->implode("\n");
 
-        $now = now()->setTimezone($this->visitorTimezone);
+        $tz = $this->resolveTimezone();
+        $now = now()->setTimezone($tz);
         $currentYear = $now->format('Y');
 
         $basePrompt = <<<PROMPT
 CURRENT YEAR: {$currentYear}
-CURRENT LOCAL TIME ({$this->visitorTimezone}): {$now->format('g:i A')}
+CURRENT LOCAL TIME ({$tz}): {$now->format('g:i A')}
 {$tenantPrompt}
 
 AVAILABLE SERVICE TYPES:
@@ -423,8 +490,10 @@ private function createReminder(Appointment $appointment)
             Log::info('CHATBOT create_lead tool called', [
                 'tenant_id' => $this->tenantId,
                 'name' => "$first_name $last_name",
-                'service' => $service_type_name
+                'service' => $service_type_name,
+                'country' => $country
             ]);
+            $phone = $this->normalizePhone($phone);
             if (
                 empty($first_name) || empty($last_name) || empty($phone) || empty($email) ||
                 empty($address) || empty($city) || empty($state) || empty($zip) || empty($country)
@@ -497,8 +566,20 @@ private function createReminder(Appointment $appointment)
 
                         $body = $template ? $template->message : "Hello {first_name}, thank you for showing interest in {service_type} services.";
 
-                        $body = str_replace('{first_name}', $lead->first_name, $body);
-                       $body = str_replace('{service_type}', $lead->service_type_name ?? 'our services', $body);
+                        // Standard variables for replacement
+                        $companyName = $tenant_agent->tenant->company ?? 'Our Company';
+                        $companyPhone = $tenant_agent->tenant->phone ?? '';
+                        $companyDomain = $tenant_agent->tenant->domain ?? '';
+                        $firstName = $lead->first_name;
+                        $serviceType = $lead->service_type_name ?? 'our services';
+
+                        $body = str_replace('{first_name}', $firstName, $body);
+                        $body = str_replace('{last_name}', $lead->last_name ?? '', $body);
+                        $body = str_replace('{service_type}', $serviceType, $body);
+                        $body = str_replace('{company_name}', $companyName, $body);
+                        $body = str_replace('{company_phone}', $companyPhone, $body);
+                        $body = str_replace('{company_phone_number}', $companyPhone, $body);
+                        $body = str_replace('{company_domain}', $companyDomain, $body);
 
 
                        $statusCallbackUrl = env('APP_URL') . '/api/twilio/status';
@@ -725,11 +806,27 @@ if ($leadId <= 0) {
             $serviceNames = collect($this->serviceTypes)->pluck('name')->toArray();
             $service_type = $this->closestMatch($service_type, $serviceNames);
 
-            // Parse time assuming it is in the visitor's local timezone
-            $startCarbon = Carbon::parse($start_time, $this->visitorTimezone);
-            $endCarbon = Carbon::parse($end_time, $this->visitorTimezone);
+            $tz = $this->resolveTimezone();
+            Log::info('CHATBOT book_appointment raw input', [
+                'start_time' => $start_time,
+                'end_time' => $end_time,
+                'visitor_tz' => $tz
+            ]);
 
-            // Safety net: Force the year to be current (2026) if it's 2023
+            $startCarbon = Carbon::parse($start_time);
+            $endCarbon = Carbon::parse($end_time);
+            if (!preg_match('/[Z+-]/', substr($start_time, -10))) {
+                $startCarbon->shiftTimezone($tz);
+            } else {
+                $startCarbon->setTimezone($tz);
+            }
+
+            if (!preg_match('/[Z+-]/', substr($end_time, -10))) {
+                $endCarbon->shiftTimezone($tz);
+            } else {
+                $endCarbon->setTimezone($tz);
+            }
+
             if ($startCarbon->year === 2023) {
                 $startCarbon->year = now()->year;
             }
@@ -737,7 +834,6 @@ if ($leadId <= 0) {
                 $endCarbon->year = now()->year;
             }
 
-            // Convert to UTC for standardized database storage
             $start_time = $startCarbon->setTimezone('UTC')->toIso8601String();
             $end_time = $endCarbon->setTimezone('UTC')->toIso8601String();
 
@@ -763,7 +859,7 @@ if ($leadId <= 0) {
                     ->first();
 
                 if ($twilioIntegration) {
-
+                    $toPhone = $this->normalizePhone($lead->phone);
                     $client = new Client($twilioIntegration->key, $twilioIntegration->secret, null, null);
                     
                     $numbers = $client->incomingPhoneNumbers->read();
@@ -777,16 +873,26 @@ if ($leadId <= 0) {
                         ? $template->message
                         : "Hi {first_name}, your appointment for {service_type} is scheduled on {date_time}.";
 
-                    $body = str_replace('{first_name}', $lead->first_name, $body);
-                    $body = str_replace('{service_type}', $service_type, $body);
-                    $body = str_replace(
-                        '{date_time}',
-                        Carbon::parse($start_time)->setTimezone($this->visitorTimezone)->format('M d, Y h:i A'),
-                        $body
-                    );
+                    // Standard variables for replacement
+                    $companyName = $tenantAgent->tenant->company ?? 'Our Company';
+                    $companyPhone = $tenantAgent->tenant->phone ?? '';
+                    $companyDomain = $tenantAgent->tenant->domain ?? '';
+                    $firstName = $lead->first_name;
+                    $serviceTypeName = $service_type ?? 'our services';
+                    $dateTimeFormatted = Carbon::parse($start_time)->setTimezone($this->resolveTimezone())->format('M d, Y h:i A');
+
+                    $body = str_replace('{first_name}', $firstName, $body);
+                    $body = str_replace('{last_name}', $lead->last_name ?? '', $body);
+                    $body = str_replace('{service_type}', $serviceTypeName, $body);
+                    $body = str_replace('{date_time}', $dateTimeFormatted, $body);
+                    $body = str_replace('{appointment_title}', $title, $body);
+                    $body = str_replace('{company_name}', $companyName, $body);
+                    $body = str_replace('{company_phone}', $companyPhone, $body);
+                    $body = str_replace('{company_phone_number}', $companyPhone, $body);
+                    $body = str_replace('{company_domain}', $companyDomain, $body);
 
                     try {
-                        $client->messages->create($lead->phone, [
+                        $client->messages->create($toPhone, [
                             'from' => $fromNumber,
                             'body' => $body,
                         ]);
@@ -827,7 +933,8 @@ if ($leadId <= 0) {
                     $firstName = $lead->first_name;
                     $fullName = trim($lead->first_name . ' ' . $lead->last_name);
                     $serviceTypeName = $service_type ?? 'our services';
-                    $dateTimeFormatted = Carbon::parse($start_time)->setTimezone($this->visitorTimezone)->format('M d, Y h:i A');
+                    // CRITICAL: $start_time is stored in UTC, so we must parse it as UTC first, then convert to visitor timezone
+                    $dateTimeFormatted = Carbon::parse($start_time, 'UTC')->setTimezone($this->resolveTimezone())->format('M d, Y h:i A');
 
                     // NEW: Variables for company info
                     $companyName = $tenantAgent->tenant->company ?? 'Our Company';
@@ -934,5 +1041,15 @@ if ($leadId <= 0) {
             ]);
             return "Error booking appointment: " . $e->getMessage();
         }
+    }
+
+    protected function normalizePhone(?string $phone): ?string
+    {
+        if (!$phone) return null;
+        $phone = preg_replace('/[^0-9]/', '', $phone);
+        if (strlen($phone) >= 10 && !str_starts_with($phone, '+')) {
+            $phone = '+' . $phone;
+        }
+        return $phone;
     }
 }
