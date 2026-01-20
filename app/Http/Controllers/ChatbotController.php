@@ -102,6 +102,7 @@ In the meantime, feel free to reach out via phone or email! 😊"
 
     try {
         $response = $agent->handleMessage($request->message);
+        Log::info('CHATBOT response', ['reply' => $response]);
         return response()->json(['reply' => $response]);
     } catch (\Exception $e) {
         Log::error('Chatbot handleMessage failed: ' . $e->getMessage(), [

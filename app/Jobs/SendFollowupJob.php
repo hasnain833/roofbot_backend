@@ -33,22 +33,27 @@ class SendFollowupJob implements ShouldQueue
         $tenantAgent = TenantAgent::where('tenant_id', $lead->tenant_id)->first();
         $tenant = $tenantAgent->tenant;
 
-        // SMS via Twilio
-        $twilioIntegration = TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
-            ->where('provider', 'twilio')
-            ->first();
-
-        if ($twilioIntegration && $lead->phone) {
+        if ($twilioIntegration) {
             try {
                 $client = new Client($twilioIntegration->key, $twilioIntegration->secret, null, null);
                 $numbers = $client->incomingPhoneNumbers->read();
                 $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
+            } catch (\Exception $e) {
+                $fromNumber = $tenant->phone ?? env('TWILIO_PHONE');
+            }
+        } else {
+            $fromNumber = $tenant->phone ?? env('TWILIO_PHONE');
+        }
+
+        if ($twilioIntegration && $lead->phone) {
+            try {
+                $client = new Client($twilioIntegration->key, $twilioIntegration->secret, null, null);
 
                 $template = \App\Models\TenantSmsTemplate::where('tenant_id', $lead->tenant_id)
                     ->where('type', 'followup')
                     ->first();
 
-                $defaultBody = "Hi {first_name}, {company_name} here following up. Are you still interested in our services?";
+                $defaultBody = "Hi {first_name}, {company_name} here following up. Are you still interested in our services? Reply here or call {company_phone} any time!";
 
                 $body = $template ? $template->message : $defaultBody;
 
@@ -59,8 +64,8 @@ class SendFollowupJob implements ShouldQueue
                 $body = str_replace('{note}', $this->followup->note ?? '', $body);
                 $body = str_replace('{company_name}', $tenant->company ?? '', $body);
                 $body = str_replace('{company_domain}', $tenant->domain ?? '', $body);
-                $body = str_replace('{company_phone_number}', $tenant->phone ?? '', $body);
-                $body = str_replace('{company_phone}', $tenant->phone ?? '', $body);
+                $body = str_replace('{company_phone_number}', $fromNumber, $body);
+                $body = str_replace('{company_phone}', $fromNumber, $body);
 
                 // Date Time support in case it's in the template
                 $lastAppointment = \App\Models\Appointment::where('lead_id', $lead->id)->latest()->first();
@@ -107,8 +112,8 @@ class SendFollowupJob implements ShouldQueue
                     ->where('type', 'followup')
                     ->first();
 
-                $defaultSubject = "Follow-up";
-                $defaultBody = "Hi {first_name},\n\n{company_name} here. We are following up on your interest in our services.\n\nBest,\n{company_name}\n{company_domain}";
+                $defaultSubject = "Following up from {company_name}";
+                $defaultBody = "Hi {first_name},\n\n{company_name} here. We are following up on your interest in {service_type}.\n\nDo you have any further questions? You can reach us by replying to this email or calling {company_phone}.\n\nBest,\n{company_name}\n{company_domain}";
 
                 $subject = $template ? $template->subject : $defaultSubject;
                 $body = $template ? $template->message : $defaultBody;
@@ -127,8 +132,8 @@ class SendFollowupJob implements ShouldQueue
                 $body = str_replace('{note}', $note, $body);
                 $body = str_replace('{company_name}', $companyName, $body);
                 $body = str_replace('{company_domain}', $companyDomain, $body);
-                $body = str_replace('{company_phone_number}', $companyPhone, $body);
-                $body = str_replace('{company_phone}', $companyPhone, $body);
+                $body = str_replace('{company_phone_number}', $fromNumber ?? '', $body);
+                $body = str_replace('{company_phone}', $fromNumber ?? '', $body);
 
                 // Replacement in subject
                 $subject = str_replace('{first_name}', $firstName, $subject);
@@ -136,8 +141,8 @@ class SendFollowupJob implements ShouldQueue
                 $subject = str_replace('{note}', $note, $subject);
                 $subject = str_replace('{company_name}', $companyName, $subject);
                 $subject = str_replace('{company_domain}', $companyDomain, $subject);
-                $subject = str_replace('{company_phone_number}', $companyPhone, $subject);
-                $subject = str_replace('{company_phone}', $companyPhone, $subject);
+                $subject = str_replace('{company_phone_number}', $fromNumber ?? '', $subject);
+                $subject = str_replace('{company_phone}', $fromNumber ?? '', $subject);
 
                 $fromEmail = $sendgridIntegration->from_email
                     ?? 'no-reply@yourdefault.com';
@@ -158,7 +163,7 @@ class SendFollowupJob implements ShouldQueue
                                 'body' => $body,
                                 'company_name' => $tenant->company ?? 'Our Company',
                                 'company_domain' => $tenant->domain ?? '',
-                                'company_phone' => $tenant->phone ?? ''
+                                'company_phone' => $fromNumber ?? ''
                             ])->render()]
                         ],
                         'tracking_settings' => [

@@ -23,7 +23,8 @@ class User extends Authenticatable
         'plan_id',
         'subscription_status',
         'current_period_end',
-        'has_valid_subscription', 
+        'has_valid_subscription',
+        'last_plan_id',
     ];
 
     protected $hidden = [
@@ -39,7 +40,7 @@ class User extends Authenticatable
         ];
     }
 
-    protected $appends = ['has_valid_subscription'];
+    protected $appends = ['has_valid_subscription', 'is_owner'];
 
    public function getHasValidSubscriptionAttribute()
 {
@@ -58,6 +59,29 @@ class User extends Authenticatable
     return $subscription->active() || $subscription->onGracePeriod();
 }
 
+public function getIsOwnerAttribute()
+{
+    if ($this->email === 'griffinb@invictusconnect.com') {
+        return true;
+    }
+
+    if ($this->plan_id !== null) {
+        $now = now();
+        $currentEnd = $this->current_period_end ? \Carbon\Carbon::parse($this->current_period_end) : null;
+
+        if (in_array($this->subscription_status, ['active', 'trialing'])) {
+            return true;
+        }
+
+        if ($this->subscription_status === 'canceled' && $currentEnd && $currentEnd->greaterThanOrEqualTo($now)) {
+            return true;
+        }
+    }
+
+    // Fallback: Check if they are the direct owner of a tenant
+    return Tenant::where('user_id', $this->id)->exists();
+}
+
        public function tenants()
 {
     return $this->belongsToMany(Tenant::class, 'tenant_users');
@@ -65,12 +89,12 @@ class User extends Authenticatable
 
 public function tenant()
 {
-    return $this->belongsTo(Tenant::class, 'id', 'user_id');
+    return $this->hasOne(Tenant::class, 'user_id');
 }
 
 public function tenantUser()
 {
-    return $this->belongsTo(TenantUser::class, 'id', 'user_id');
+    return $this->hasOne(TenantUser::class, 'user_id');
 }
 
 public function leads()

@@ -101,18 +101,19 @@ class LeadController extends Controller
                     $client = new Client($integration->key, $integration->secret, null, null);
                     $numbers = $client->incomingPhoneNumbers->read();
                     $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
+                    $this->twilioFromNumber = $fromNumber;
                     $template = \App\Models\TenantSmsTemplate::where('tenant_id', $tenant->id)
                         ->where('type', 'lead')
                         ->first();
 
-                    $body = $template ? $template->message : "Hello {first_name}, thank you for showing interest in {service_type} services at {company_name}!";
+                    $body = $template ? $template->message : "Hi {first_name}, thank you for your interest in {service_type} at {company_name}. If you have questions, call us at {company_phone}!";
 
                     $body = str_replace('{first_name}', $lead->first_name, $body);
                     $body = str_replace('{service_type}', optional($lead->serviceType)->name ?? ' services', $body);
                     $body = str_replace('{company_name}', $tenant->company ?? '', $body);
                     $body = str_replace('{company_domain}', $tenant->domain ?? '', $body);
-                    $body = str_replace('{company_phone_number}', $tenant->phone ?? '', $body);
-                    $body = str_replace('{company_phone}', $tenant->phone ?? '', $body);
+                    $body = str_replace('{company_phone_number}', $fromNumber, $body);
+                    $body = str_replace('{company_phone}', $fromNumber, $body);
 
                     $statusCallbackUrl = env('APP_URL') . '/api/twilio/status';
 
@@ -161,8 +162,8 @@ class LeadController extends Controller
                         ->where('type', 'lead')
                         ->first();
 
-                    $defaultSubject = 'Thank You';
-                    $defaultBody = "Hi {first_name},\n\nThank you for your interest in {service_type} services at {company_name}.\n\nVisit us: {company_domain}";
+                    $defaultSubject = 'Thank You for contacting {company_name}';
+                    $defaultBody = "Hi {first_name},\n\nThank you for your interest in {service_type} at {company_name}. We have received your request and will reach out shortly.\n\nVisit us: {company_domain}\nContact us: {company_phone}";
 
                     $subject = $template?->subject ?? $defaultSubject;
                     $body = $template?->message ?? $defaultBody;
@@ -176,7 +177,9 @@ class LeadController extends Controller
                     );
                     $body = str_replace('{company_name}', $tenant->company ?? '', $body);
                     $body = str_replace('{company_domain}', $tenant->domain ?? '', $body);
-                    $body = str_replace('{company_phone_number}', $tenant->phone ?? '', $body);
+                    $fromNumber = $this->twilioFromNumber ?? $tenant->phone ?? '';
+                    $body = str_replace('{company_phone_number}', $fromNumber, $body);
+                    $body = str_replace('{company_phone}', $fromNumber, $body);
 
                     // Variable replacement for subject
                     $subject = str_replace('{first_name}', $lead->first_name, $subject);
@@ -187,8 +190,9 @@ class LeadController extends Controller
                     );
                     $subject = str_replace('{company_name}', $tenant->company ?? '', $subject);
                     $subject = str_replace('{company_domain}', $tenant->domain ?? '', $subject);
-                    $subject = str_replace('{company_phone_number}', $tenant->phone ?? '', $subject);
-                    $subject = str_replace('{company_phone}', $tenant->phone ?? '', $subject);
+                    $fromNumber = $this->twilioFromNumber ?? $tenant->phone ?? '';
+                    $subject = str_replace('{company_phone_number}', $fromNumber, $subject);
+                    $subject = str_replace('{company_phone}', $fromNumber, $subject);
 
                     $fullName = trim($lead->first_name . ' ' . ($lead->last_name ?? ''));
 
@@ -199,7 +203,7 @@ class LeadController extends Controller
                         'body' => $body,
                         'company_name' => $tenant->company ?? 'Our Company',
                         'company_domain' => $tenant->domain ?? '',
-                        'company_phone' => $tenant->phone ?? ''
+                        'company_phone' => $fromNumber ?? ''
                     ])->render();
 
                     $response = Http::withHeaders(['Authorization' => 'Bearer ' . $sendgridIntegration->key])
@@ -470,8 +474,9 @@ Service Type: {$serviceType}";
                     $client = new Client($integration->key, $integration->secret, null, null);
                     $numbers = $client->incomingPhoneNumbers->read();
                     $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
+                    $this->twilioFromNumber = $fromNumber;
                     $serviceName = optional($lead->serviceType)->name ?? 'our service';
-                    $body = "Hello {$lead->first_name}, thank you for showing interest in {$serviceName}. We will contact you shortly!";
+                    $body = "Hi {$lead->first_name}, thank you for your interest in {$serviceName} at " . ($tenantAgent->tenant->company ?? 'our company') . ". We will contact you shortly! Questions? Call {$fromNumber}.";
 
                     $client->messages->create($lead->phone, [
                         'from' => $fromNumber,
@@ -523,8 +528,9 @@ Service Type: {$serviceType}";
                         $body = str_replace('{service_type}', optional($lead->serviceType)->name ?? 'our services', $body);
                         $body = str_replace('{company_name}', $tenant->company ?? '', $body);
                         $body = str_replace('{company_domain}', $tenant->domain ?? '', $body);
-                        $body = str_replace('{company_phone_number}', $tenant->phone ?? '', $body);
-                        $body = str_replace('{company_phone}', $tenant->phone ?? '', $body);
+                        $fromNumber = $this->twilioFromNumber ?? $tenant->phone ?? '';
+                        $body = str_replace('{company_phone_number}', $fromNumber, $body);
+                        $body = str_replace('{company_phone}', $fromNumber, $body);
 
                         $fullName = trim($lead->first_name . ' ' . ($lead->last_name ?? ''));
                         
@@ -533,7 +539,7 @@ Service Type: {$serviceType}";
                             'body' => $body,
                             'company_name' => $tenant->company ?? 'Our Company',
                             'company_domain' => $tenant->domain ?? '',
-                            'company_phone' => $tenant->phone ?? ''
+                            'company_phone' => $this->twilioFromNumber ?? $tenant->phone ?? ''
                         ])->render();
 
                         $response = Http::withHeaders(['Authorization' => 'Bearer ' . $sendgridIntegration->key])
@@ -544,7 +550,7 @@ Service Type: {$serviceType}";
                                         'subject' => $subject,
                                     ]
                                 ],
-                                'from' => ['email' => $fromEmail, 'name' => $companyName],
+                                'from' => ['email' => $sendgridIntegration->from_email ?? 'no-reply@yourdefault.com', 'name' => $companyName],
                                 'content' => [
                                     ['type' => 'text/html', 'value' => $htmlContent]
                                 ],

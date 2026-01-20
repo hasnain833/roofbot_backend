@@ -37,6 +37,7 @@ class AppointmentController extends Controller
 
     public function store(Request $request)
     {
+        Log::info('Appointment store request raw', ['all' => $request->all()]);
         $validated = $request->validate([
             'lead_id' => 'nullable|exists:leads,id',
             'title' => 'required|string|max:255',
@@ -69,12 +70,13 @@ class AppointmentController extends Controller
                     $client = new Client($twilioIntegration->key, $twilioIntegration->secret);
                     $numbers = $client->incomingPhoneNumbers->read();
                     $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
+                    $this->twilioFromNumber = $fromNumber; // Cache for email block
 
                     $template = TenantSmsTemplate::where('tenant_id', $tenant->id)
                         ->where('type', 'appointment')
                         ->first();
 
-                    $defaultBody = "Hi {first_name}, your appointment for {service_type} with {company_name} is scheduled on {date_time}. See you soon!";
+                    $defaultBody = "Hi {first_name}, your appointment for {service_type} with {company_name} is confirmed for {date_time}. If you need to reschedule, call us at {company_phone}.";
                     $body = $template?->message ?? $defaultBody;
 
                     $body = str_replace('{first_name}', $lead->first_name, $body);
@@ -82,8 +84,8 @@ class AppointmentController extends Controller
                     $body = str_replace('{date_time}', Carbon::parse($appointment->start_time)->format('M d, Y h:i A'), $body);
                     $body = str_replace('{company_name}', $tenant->company ?? '', $body);
                     $body = str_replace('{company_domain}', $tenant->domain ?? '', $body);
-                    $body = str_replace('{company_phone_number}', $tenant->phone ?? '', $body);
-                    $body = str_replace('{company_phone}', $tenant->phone ?? '', $body);
+                    $body = str_replace('{company_phone_number}', $fromNumber, $body);
+                    $body = str_replace('{company_phone}', $fromNumber, $body);
 
                     $client->messages->create($lead->phone, [
                         'from' => $fromNumber,
@@ -116,8 +118,8 @@ class AppointmentController extends Controller
                         ->where('type', 'appointment')
                         ->first();
 
-                    $defaultSubject = 'Your Appointment is Confirmed';
-                    $defaultBody = "Hi {first_name},\n\nYour appointment for {service_type} with {company_name} is scheduled on {date_time}. See you soon!\n\nContact: {company_phone_number}";
+                    $defaultSubject = 'Appointment Confirmed: {company_name}';
+                    $defaultBody = "Hi {first_name},\n\nYour appointment for {service_type} with {company_name} is scheduled on {date_time}. See you soon!\n\nQuestions? Call us at {company_phone}.";
 
                     $subject = $template?->subject ?? $defaultSubject;
                     $body = $template?->message ?? $defaultBody;
@@ -128,7 +130,7 @@ class AppointmentController extends Controller
                     $dateTime = Carbon::parse($appointment->start_time)->format('M d, Y h:i A');
                     $companyName = $tenant->company ?? '';
                     $companyDomain = $tenant->domain ?? '';
-                    $companyPhone = $tenant->phone ?? '';
+                    $fromNumber = $this->twilioFromNumber ?? $tenant->phone ?? '';
 
                     // Replace in body
                     $body = str_replace('{first_name}', $firstName, $body);
@@ -136,8 +138,8 @@ class AppointmentController extends Controller
                     $body = str_replace('{date_time}', $dateTime, $body);
                     $body = str_replace('{company_name}', $companyName, $body);
                     $body = str_replace('{company_domain}', $companyDomain, $body);
-                    $body = str_replace('{company_phone_number}', $companyPhone, $body);
-                    $body = str_replace('{company_phone}', $companyPhone, $body);
+                    $body = str_replace('{company_phone_number}', $fromNumber, $body);
+                    $body = str_replace('{company_phone}', $fromNumber, $body);
 
                     // Replace in subject
                     $subject = str_replace('{first_name}', $firstName, $subject);
@@ -145,21 +147,11 @@ class AppointmentController extends Controller
                     $subject = str_replace('{date_time}', $dateTime, $subject);
                     $subject = str_replace('{company_name}', $companyName, $subject);
                     $subject = str_replace('{company_domain}', $companyDomain, $subject);
-                    $subject = str_replace('{company_phone_number}', $companyPhone, $subject);
-                    $subject = str_replace('{company_phone}', $companyPhone, $subject);
-
-                    $email = new Mail();
-                    $email->setClickTracking(false, false);
-                    $email->setOpenTracking(false);
+                    $subject = str_replace('{company_phone_number}', $fromNumber, $subject);
+                    $subject = str_replace('{company_phone}', $fromNumber, $subject);
 
                     $fromEmail = $sendgridIntegration->from_email
                         ?? 'no-reply@yourdefault.com'; 
-
-                    $email->setFrom(
-                        $fromEmail,
-                        $tenant->company ?? 'Your Company'
-                    );
-                    $email->setSubject($subject);
 
                     $fullName = trim($lead->first_name . ' ' . ($lead->last_name ?? ''));
                     
@@ -168,7 +160,7 @@ class AppointmentController extends Controller
                         'body' => $body,
                         'company_name' => $tenant->company ?? 'Our Company',
                         'company_domain' => $tenant->domain ?? '',
-                        'company_phone' => $tenant->phone ?? ''
+                        'company_phone' => $fromNumber
                     ])->render();
 
                     $response = Http::withHeaders(['Authorization' => 'Bearer ' . $sendgridIntegration->key])

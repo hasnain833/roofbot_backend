@@ -65,9 +65,9 @@ Route::middleware('auth:sanctum')->group(function () {
 // Route::get('/chatbot/{botToken}', [ChatbotController::class, 'iframeChatbot']);
 
 Route::middleware('auth:sanctum')->group(function () {
-    // Route::get('/profile/update', [UserController::class, 'updateProfile']);
     Route::put('/profile/update', [UserController::class, 'updateProfile']);
     Route::put('/profile/password/update', [UserController::class, 'updatePasswordProfile']);
+    Route::get('/auth/user', [UserController::class, 'me']);
 });
 
 
@@ -108,7 +108,6 @@ Route::post('/twilio/voice/status', [TwilioController::class, 'handleVoiceStatus
 
 
 Route::post('/n8n/appointment', function (Request $request) {
-    \Log::info('N8N Appointment Webhook Hit', $request->all());
     return response()->json(['message' => 'Webhook received', 'data' => $request->all()]);
 });
 
@@ -220,7 +219,5 @@ Route::middleware(['auth:sanctum', 'subscription'])->group(function () {
     Route::apiResource('crm-jobs', CrmJobController::class);
 
     // Profile
-    Route::get('/profile/update', [UserController::class, 'updateProfile']);
     Route::put('/profile/password/update', [UserController::class, 'updatePasswordProfile']);
-
 });

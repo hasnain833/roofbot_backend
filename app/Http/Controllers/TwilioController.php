@@ -39,7 +39,7 @@ class TwilioController extends Controller
             $numbers = $client->incomingPhoneNumbers->read();
             $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
 
-            $callbackUrl = env('APP_URL') . '/api/twilio/status';
+            $callbackUrl = $this->getCallbackUrl('/api/twilio/status');
 
             $message = $client->messages->create(
                 $request->to,
@@ -113,12 +113,10 @@ class TwilioController extends Controller
                 return response('Tenant not found', 200);
             }
 
-            $lead = Lead::where('phone', $from)
-                ->where('tenant_id', $tenantAgent->tenant_id)
-                ->first();
+            $lead = $this->findLeadByPhone($from, $tenantAgent->tenant_id);
 
             if (!$lead) {
-                Log::info("ℹ️ Inbound from unknown number $from — could auto-create lead here if desired");
+                Log::info("ℹ️ Inbound from unknown number $from — ignoring.");
                 return response('No lead found', 200);
             }
 
@@ -131,18 +129,7 @@ class TwilioController extends Controller
 
             Log::info("✅ Message saved for Lead ID {$lead->id}");
 
-            $lastOutbound = Message::where('lead_id', $lead->id)
-                ->where('out', true)
-                ->latest()
-                ->first();
-
-            $shouldAutoRespond = false;
-
-            // CASE 1: Lead is replying after missed call → AI ON
-            if ($lead->missed_call_active) {
-                $shouldAutoRespond = true;
-            }
-
+            $shouldAutoRespond = true; // Always try to respond to known leads
 
             if ($shouldAutoRespond && !empty($body)) {
                 $apiKey = $this->getTenantOpenAiKey();
@@ -173,6 +160,7 @@ class TwilioController extends Controller
                     $message = $client->messages->create($from, [
                         'from' => $to,
                         'body' => $responseText,
+                        'statusCallback' => $this->getCallbackUrl('/api/twilio/status'),
                     ]);
 
                     Message::create([
@@ -341,9 +329,7 @@ Highlight intent, questions, tone, and next steps:\n\n{$chatText}";
                 return response((string)$response)->header('Content-Type', 'text/xml');
             }
 
-            $lead = Lead::where('phone', $from)
-                ->where('tenant_id', $tenantAgent->tenant_id)
-                ->first();
+            $lead = $this->findLeadByPhone($from, $tenantAgent->tenant_id);
 
             if (!$lead) {
                 Log::info("ℹ️ Inbound call from unknown number $from (tenant {$tenantAgent->tenant_id}). Playing welcome message.");
@@ -365,13 +351,13 @@ Highlight intent, questions, tone, and next steps:\n\n{$chatText}";
             }
 
             // Forward call to tenant
-            $appUrl = rtrim(env('APP_URL'), '/');
+            $appUrl = $this->getCallbackUrl('/');
 
             $response = new VoiceResponse();
             $dial = $response->dial($tenantPhone, [
                 'timeout' => 25,
                 'callerId' => $to,
-                'statusCallback' => $appUrl . '/api/twilio/voice-status',
+                'statusCallback' => $this->getCallbackUrl('/api/twilio/voice/status'),
                 'statusCallbackMethod' => 'POST',
                 'statusCallbackEvent' => 'no-answer busy failed completed',
             ]);
@@ -434,9 +420,7 @@ Highlight intent, questions, tone, and next steps:\n\n{$chatText}";
             $tenantAgent = TenantAgent::find($integration->tenant_agent_id);
             if (!$tenantAgent) return response()->json(['success' => false]);
 
-            $lead = Lead::where('phone', $from)
-                ->where('tenant_id', $tenantAgent->tenant_id)
-                ->first();
+            $lead = $this->findLeadByPhone($from, $tenantAgent->tenant_id);
 
             if ($lead) {
                 // Check if we already sent a missed call SMS in the last 10 mins
@@ -482,5 +466,39 @@ Highlight intent, questions, tone, and next steps:\n\n{$chatText}";
         return response()->json(['success' => true]);
     }
 
+    private function findLeadByPhone(string $phone, int $tenantId)
+    {
+        if (empty($phone)) return null;
 
+        // 1. Try exact match
+        $lead = Lead::where('phone', $phone)
+            ->where('tenant_id', $tenantId)
+            ->first();
+
+        if ($lead) return $lead;
+
+        // 2. Try robust match (last 10 digits)
+        $digits = preg_replace('/[^0-9]/', '', $phone);
+        if (strlen($digits) >= 10) {
+            $last10 = substr($digits, -10);
+            return Lead::where('tenant_id', $tenantId)
+                ->where('phone', 'like', "%$last10")
+                ->first();
+        }
+
+        return null;
+    }
+
+    private function getCallbackUrl(string $path)
+    {
+        $appUrl = env('APP_URL', 'http://localhost');
+        
+        // If APP_URL is localhost/3000 but the request came from elsewhere, use the request host
+        if ((str_contains($appUrl, 'localhost') || str_contains($appUrl, '127.0.0.1')) && request()->header('host')) {
+            $scheme = request()->isSecure() ? 'https' : 'http';
+            $appUrl = $scheme . '://' . request()->header('host');
+        }
+
+        return rtrim($appUrl, '/') . $path;
+    }
 }

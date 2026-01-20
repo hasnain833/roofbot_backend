@@ -144,7 +144,7 @@ class LeadAgent extends Agent
 
     public function setServiceTypes($types): self
     {
-        $this->serviceTypes = $types->toArray();
+        $this->serviceTypes = is_array($types) ? $types : $types->toArray();
         return $this;
     }
 
@@ -186,8 +186,8 @@ IMPORTANT: All dates and times provided by the user are relative to their locati
 3. When calling `book_appointment`, pass the user's local time exactly as a naive string (YYYY-MM-DD HH:mm:ss). DO NOT perform any UTC conversion yourself.
 
 Example Flow:
-User says "I'm in Chicago" -> You call set_visitor_timezone_context('America/Chicago') -> You continue the conversation.
-User says "4pm tomorrow" -> You call book_appointment with start_time: "2026-01-20 16:00:00".
+- User says "I'm in Chicago" -> You call set_visitor_timezone_context('America/Chicago')
+- User says "4pm tomorrow" -> You calculate the date for tomorrow based on the CURRENT VISITOR DATE and call book_appointment with that date.
 
 You are a friendly roofing intake assistant. Your job is to collect customer information for booking appointments.
 
@@ -221,8 +221,9 @@ PHASE 1: COLLECT BASIC INFORMATION
 • Once address is received, call the create_lead tool IMMEDIATELY. 
 • After lead is created, you MUST first ask all custom questions (Phase 3) before asking for appointment date/time.
 • After lead is created and ALL custom questions are answered, ask for the appointment date and time.
-• IMPORTANT: Do NOT tell the user you are creating a lead or calling a tool.
-• IMPORTANT: Do NOT ask for a specific date/time format (like MM/DD/YY). Just ask a natural question like "What date and time work best for you?".
+• SILENT EXECUTION: When you call create_lead, book_appointment, or save_custom_answer, do NOT tell the user you are doing so.
+• Do NOT say "Hold on", "I'll now create...", or "Wait a second".
+• Simply execute the tool and respond with the NEXT question or the completion message immediately.
 • NEVER repeat already provided information. Review the conversation summary.
 
 PHASE 2: CREATE LEAD (when all info is collected)
@@ -293,11 +294,8 @@ After appointment is booked, clear all data for the next customer.
 • If no match exists, ask the user to choose from the list
 
 
-CRITICAL RULES:
-───────────────
-✓ ALWAYS read the conversation summary above before responding
-✓ NEVER repeat questions about information already provided
-✓ NEVER show tool calls, JSON, or parameters to the user,dont tell user that you are creating a lead.
+✓ SILENCE RULE: Do NOT narrate or announce your internal actions (e.g., "I'm creating your lead"). 
+✓ NEVER show tool calls, JSON, or parameters to the user.
 ✓ Be conversational, warm, and professional
 ✓ Keep responses brief (1-2 sentences per message)
 ✓ Only ask for ONE missing piece of information at a time
@@ -356,7 +354,7 @@ PROMPT;
         $currentYear = $now->format('Y');
 
         $basePrompt = <<<PROMPT
-CURRENT YEAR: {$currentYear}
+CURRENT VISITOR DATE ({$tz}): {$now->format('l, F j, Y')}
 CURRENT LOCAL TIME ({$tz}): {$now->format('g:i A')}
 {$tenantPrompt}
 
@@ -564,11 +562,11 @@ private function createReminder(Appointment $appointment)
                             ->where('type', 'lead')
                             ->first();
 
-                        $body = $template ? $template->message : "Hello {first_name}, thank you for showing interest in {service_type} services.";
+                        $body = $template ? $template->message : "Hi {first_name}, thank you for your interest in {service_type} at {company_name}. If you have questions, call us at {company_phone}!";
 
                         // Standard variables for replacement
                         $companyName = $tenant_agent->tenant->company ?? 'Our Company';
-                        $companyPhone = $tenant_agent->tenant->phone ?? '';
+                        $companyPhone = $fromNumber;
                         $companyDomain = $tenant_agent->tenant->domain ?? '';
                         $firstName = $lead->first_name;
                         $serviceType = $lead->service_type_name ?? 'our services';
@@ -582,13 +580,13 @@ private function createReminder(Appointment $appointment)
                         $body = str_replace('{company_domain}', $companyDomain, $body);
 
 
-                       $statusCallbackUrl = env('APP_URL') . '/api/twilio/status';
+                        $statusCallbackUrl = env('APP_URL') . '/api/twilio/status';
 
                         $twilioMessage = $client->messages->create($lead->phone, [
-                'from' => $fromNumber,
-                'body' => $body,
-                'statusCallback' => $statusCallbackUrl,
-            ]);
+                            'from' => $fromNumber,
+                            'body' => $body,
+                            'statusCallback' => $statusCallbackUrl,
+                        ]);
                       \App\Models\Message::create([
                 'lead_id' => $lead->id,
                 'text' => $body,
@@ -827,10 +825,11 @@ if ($leadId <= 0) {
                 $endCarbon->setTimezone($tz);
             }
 
-            if ($startCarbon->year === 2023) {
+            // Ensure the year is current if not specified or clearly in the past
+            if ($startCarbon->year < now()->year) {
                 $startCarbon->year = now()->year;
             }
-            if ($endCarbon->year === 2023) {
+            if ($endCarbon->year < now()->year) {
                 $endCarbon->year = now()->year;
             }
 
@@ -864,6 +863,7 @@ if ($leadId <= 0) {
                     
                     $numbers = $client->incomingPhoneNumbers->read();
                     $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
+                    $this->twilioFromNumber = $fromNumber;
 
                     $template = \App\Models\TenantSmsTemplate::where('tenant_id', $this->tenantId)
                         ->where('type', 'appointment')
@@ -871,11 +871,11 @@ if ($leadId <= 0) {
 
                     $body = $template
                         ? $template->message
-                        : "Hi {first_name}, your appointment for {service_type} is scheduled on {date_time}.";
+                        : "Hi {first_name}, your appointment for {service_type} with {company_name} is confirmed for {date_time}. Questions? Call {company_phone}.";
 
                     // Standard variables for replacement
                     $companyName = $tenantAgent->tenant->company ?? 'Our Company';
-                    $companyPhone = $tenantAgent->tenant->phone ?? '';
+                    $companyPhone = $fromNumber;
                     $companyDomain = $tenantAgent->tenant->domain ?? '';
                     $firstName = $lead->first_name;
                     $serviceTypeName = $service_type ?? 'our services';
@@ -892,9 +892,11 @@ if ($leadId <= 0) {
                     $body = str_replace('{company_domain}', $companyDomain, $body);
 
                     try {
+                        $statusCallbackUrl = env('APP_URL') . '/api/twilio/status';
                         $client->messages->create($toPhone, [
                             'from' => $fromNumber,
                             'body' => $body,
+                            'statusCallback' => $statusCallbackUrl,
                         ]);
                     } catch (\Exception $smsEx) {
                         Log::warning('Chatbot appointment SMS failed', [
@@ -923,8 +925,8 @@ if ($leadId <= 0) {
                         ->where('type', 'appointment')
                         ->first();
 
-                    $defaultSubject = 'Your Appointment is Confirmed';
-                    $defaultBody = "Hi {first_name},\n\nYour appointment for {service_type} is scheduled on {date_time}. See you soon!";
+                    $defaultSubject = 'Appointment Confirmed: {company_name}';
+                    $defaultBody = "Hi {first_name},\n\nYour appointment for {service_type} with {company_name} is scheduled on {date_time}. See you soon!\n\nQuestions? Call us at {company_phone}.";
 
                     $subject = $template?->subject ?? $defaultSubject;
                     $body = $template?->message ?? $defaultBody;
@@ -938,7 +940,7 @@ if ($leadId <= 0) {
 
                     // NEW: Variables for company info
                     $companyName = $tenantAgent->tenant->company ?? 'Our Company';
-                    $companyPhone = $tenantAgent->tenant->phone ?? '';
+                    $companyPhone = $this->twilioFromNumber ?? $tenantAgent->tenant->phone ?? '';
                     $companyDomain = $tenantAgent->tenant->domain ?? '';
 
                     // Replacement in body

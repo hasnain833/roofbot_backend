@@ -13,6 +13,10 @@ use App\Helper;
 
 class UserController extends Controller
 {
+    public function __construct()
+    {
+        UserResource::withoutWrapping();
+    }
     /**
      * List all users (only admin)
      */
@@ -169,8 +173,13 @@ public function updateProfile(Request $request)
 
     return response()->json([
         'message' => 'User updated successfully',
-        'user' => $user
+        'user' => new UserResource($user)
     ], 200);
+}
+
+public function me()
+{
+    return new UserResource(Auth::user());
 }
 
 public function updatePasswordProfile(Request $request)

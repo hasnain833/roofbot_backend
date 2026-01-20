@@ -35,22 +35,27 @@ class SendReminderJob implements ShouldQueue
     $tenantAgent = TenantAgent::where('tenant_id', $appointment->tenant_id)->first();
     $tenant = $tenantAgent->tenant;
 
-    // SMS via Twilio
-    $twilioIntegration = TenantAgentIntegration::where('tenant_agent_id', $tenantAgent->id)
-        ->where('provider', 'twilio')
-        ->first();
-
-    if ($twilioIntegration && $lead->phone) {
+    if ($twilioIntegration) {
         try {
             $client = new Client($twilioIntegration->key, $twilioIntegration->secret, null, null);
             $numbers = $client->incomingPhoneNumbers->read();
             $fromNumber = $numbers[0]->phoneNumber ?? env('TWILIO_PHONE');
+        } catch (\Exception $e) {
+            $fromNumber = $tenant->phone ?? env('TWILIO_PHONE');
+        }
+    } else {
+        $fromNumber = $tenant->phone ?? env('TWILIO_PHONE');
+    }
+
+    if ($twilioIntegration && $lead->phone) {
+        try {
+            $client = new Client($twilioIntegration->key, $twilioIntegration->secret, null, null);
 
             $template = \App\Models\TenantSmsTemplate::where('tenant_id', $appointment->tenant_id)
                 ->where('type', 'reminder')
                 ->first();
 
-            $defaultBody = "Reminder: Your appointment with {company_name} is in 24 hours on {date_time}. Title: {appointment_title}.";
+            $defaultBody = "Reminder: Your {service_type} appointment with {company_name} is in 24 hours on {date_time}. See you soon! Questions? Call {company_phone}.";
 
             $body = $template ? $template->message : $defaultBody;
 
@@ -63,8 +68,8 @@ class SendReminderJob implements ShouldQueue
             $body = str_replace('{appointment_title}', $appointment->title, $body);
             $body = str_replace('{company_name}', $tenant->company ?? '', $body);
             $body = str_replace('{company_domain}', $tenant->domain ?? '', $body);
-            $body = str_replace('{company_phone_number}', $tenant->phone ?? '', $body);
-            $body = str_replace('{company_phone}', $tenant->phone ?? '', $body);
+            $body = str_replace('{company_phone_number}', $fromNumber, $body);
+            $body = str_replace('{company_phone}', $fromNumber, $body);
 
             $client->messages->create($lead->phone, [
                 'from' => $fromNumber,
@@ -100,8 +105,8 @@ class SendReminderJob implements ShouldQueue
                 ->where('type', 'reminder')
                 ->first();
 
-            $defaultSubject = "Appointment Reminder: 24 Hours Away";
-            $defaultBody = "Hi {first_name},\n\nThis is a friendly reminder that your appointment with {company_name} is in 24 hours on {date_time}.\nTitle: {appointment_title}.\n\nSee you soon!";
+            $defaultSubject = "Appointment Reminder: {company_name}";
+            $defaultBody = "Hi {first_name},\n\nThis is a friendly reminder that your {service_type} appointment with {company_name} is in 24 hours ({date_time}).\n\nSee you soon! If you have any last-minute questions, please call {company_phone}.";
 
             $subject = $template ? $template->subject : $defaultSubject;
             $body = $template ? $template->message : $defaultBody;
@@ -122,8 +127,8 @@ class SendReminderJob implements ShouldQueue
             $body = str_replace('{appointment_title}', $appointmentTitle, $body);
             $body = str_replace('{company_name}', $companyName, $body);
             $body = str_replace('{company_domain}', $companyDomain, $body);
-            $body = str_replace('{company_phone_number}', $companyPhone, $body);
-            $body = str_replace('{company_phone}', $companyPhone, $body);
+            $body = str_replace('{company_phone_number}', $fromNumber ?? '', $body);
+            $body = str_replace('{company_phone}', $fromNumber ?? '', $body);
 
             // Replacement in subject
             $subject = str_replace('{first_name}', $firstName, $subject);
@@ -131,8 +136,8 @@ class SendReminderJob implements ShouldQueue
             $subject = str_replace('{appointment_title}', $appointmentTitle, $subject);
             $subject = str_replace('{company_name}', $companyName, $subject);
             $subject = str_replace('{company_domain}', $companyDomain, $subject);
-            $subject = str_replace('{company_phone_number}', $companyPhone, $subject);
-            $subject = str_replace('{company_phone}', $companyPhone, $subject);
+            $subject = str_replace('{company_phone_number}', $fromNumber ?? '', $subject);
+            $subject = str_replace('{company_phone}', $fromNumber ?? '', $subject);
 
             $fromEmail = $sendgridIntegration->from_email ?? 'no-reply@yourdefault.com';
             $fullName = $lead->first_name . ' ' . ($lead->last_name ?? '');
@@ -152,7 +157,7 @@ class SendReminderJob implements ShouldQueue
                             'body' => $body,
                             'company_name' => $tenant->company ?? 'Our Company',
                             'company_domain' => $tenant->domain ?? '',
-                            'company_phone' => $tenant->phone ?? ''
+                            'company_phone' => $fromNumber ?? ''
                         ])->render()]
                     ],
                     'tracking_settings' => [
