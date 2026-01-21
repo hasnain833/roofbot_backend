@@ -186,6 +186,8 @@ public function handleMessagePublic(Request $request)
             ->where('status', 'active')
             ->first();
 
+        $chatbot = \App\Models\Chatbot::where('tenant_id', $tenant->id)->first();
+
         if (!$agent) {
             Log::warning('Chatbot sessionInfo: No active agent found for tenant', [
                 'tenant_id' => $tenant->id,
@@ -212,6 +214,7 @@ public function handleMessagePublic(Request $request)
             'session_id' => $sessionId,
             'ip_address' => $ipAddress,
             'company'    => $tenant->company,
+            'bot_token'  => $chatbot ? $chatbot->bot_token : null,
         ]);
     }
    // ChatbotController.php
@@ -241,6 +244,7 @@ public function sessionInfoIframe(Request $request)
         'session_id' => $sessionId,
         'ip_address' => $request->ip(),
         'company'    => $tenant->company, 
+        'bot_token'  => $token,
     ]);
 }
 
